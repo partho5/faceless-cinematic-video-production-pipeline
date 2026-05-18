@@ -643,10 +643,15 @@ class App:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(SRC) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONUNBUFFERED"] = "1"
+        # Windows: the child prints UTF-8 (✅ ● → …); without this the
+        # default console codepage (cp1252) garbles or crashes the stream.
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         try:
             self.proc = subprocess.Popen(
                 argv, cwd=str(ROOT), env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, bufsize=1,
+                encoding="utf-8", errors="replace",
             )
             assert self.proc.stdout is not None
             for line in self.proc.stdout:

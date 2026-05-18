@@ -112,28 +112,99 @@ YouTube Data API v3 (optional upload) · pytest.
 
 ---
 
-## Install
+## Install & run
 
-Requires **Python ≥ 3.10** and **FFmpeg** on the system.
+Needs **Python ≥ 3.10** and **FFmpeg** on `PATH` — the pipeline calls
+`ffmpeg`/`ffprobe` directly (audio master, QA, thumbnail) and MoviePy uses
+them for the render. The same code, commands and flags work on Linux and
+Windows; only the venv-activate path and `cp`/`copy` differ. `stable-ts`
+(forced alignment) pulls in PyTorch and is heavy — it is lazy-imported, so
+the pipeline still runs (proportional alignment) if you skip it.
+
+### Linux
 
 ```bash
+# 1. system prerequisites (Debian/Ubuntu — use your distro's equivalents)
+sudo apt update
+sudo apt install -y python3 python3-venv python3-tk ffmpeg
+#    python3-tk is required for the GUI; ffmpeg is mandatory.
+
+# 2. code + isolated environment
 git clone <your-repo-url>
 cd video-production-pipeline
-
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
+# 3. dependencies
 pip install -r requirements.txt        # full stack
-# minimal offline render only:
-# pip install numpy Pillow PyYAML requests moviepy pydub opencv-python-headless
+pip install -e .                       # makes `vp` importable (no PYTHONPATH)
+#    minimal offline-only render instead of the full stack:
+#    pip install numpy Pillow PyYAML requests moviepy pydub opencv-python-headless
+
+# 4. configure keys/models (see "Configure" below; skip for fully offline)
+cp .env.example .env
+cp config.example.yaml config.yaml
+
+# 5a. run — GUI
+python run.py
+# 5b. run — CLI (preview = fast 540p, final = 1080p)
+python -m vp.run "The 7 signs someone is quietly manipulating you" --approve
 ```
 
-`stable-ts` pulls in torch/whisper and is heavy; it is lazy-imported, so the
-pipeline still runs (with proportional alignment) if you skip it.
+### Windows
+
+Use **PowerShell** (recommended) or `cmd`. No code differs from Linux.
+
+```powershell
+# 1. prerequisites
+#  - Python 3.10+ from https://python.org  → tick "Add python.exe to PATH"
+#    (the python.org installer bundles Tkinter — nothing extra for the GUI)
+#  - FFmpeg on PATH, then reopen the terminal so PATH refreshes:
+winget install Gyan.FFmpeg
+#    (or `choco install ffmpeg`, or unzip a build and add its \bin to PATH)
+#    verify in a NEW terminal:  ffmpeg -version
+
+# 2. code + isolated environment
+git clone <your-repo-url>
+cd video-production-pipeline
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+#    cmd.exe instead:                 .venv\Scripts\activate.bat
+#    if PowerShell blocks the script: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+# 3. dependencies
+pip install -r requirements.txt
+pip install -e .                       # makes `vp` importable (no PYTHONPATH)
+
+# 4. configure keys/models (see "Configure" below; skip for fully offline)
+copy .env.example .env
+copy config.example.yaml config.yaml
+
+# 5a. run — GUI
+python run.py
+# 5b. run — CLI
+python -m vp.run "The 7 signs someone is quietly manipulating you" --approve
+```
+
+**Windows notes**
+
+- **FFmpeg on PATH is mandatory** — without it the render/QA steps fail.
+  Always open a *new* terminal after installing it.
+- **Long paths:** deep MoviePy temp paths under `output\<slug>\_work\` can
+  exceed the legacy 260-char limit. Keep the repo near the drive root
+  (e.g. `C:\vp\`), or enable long paths once in an **admin** PowerShell:
+  `New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force`
+- **Forced alignment (`stable-ts`)** is optional and large (PyTorch). Skip
+  it and proportional alignment is used; to enable: `pip install stable-ts`
+  (the CPU Torch wheel is fine — no CUDA/GPU needed).
+- Caption fonts (Arial/Segoe UI) and console Unicode are handled
+  automatically — the GUI runs the pipeline in UTF-8 mode.
 
 The offline voice fallback uses a Piper `.onnx` model in `assets/tts_voices/`
-(git-ignored due to size — download separately if you want the offline voice;
-otherwise online Gemini TTS is used).
+(git-ignored due to size — download separately for the offline voice;
+otherwise online Gemini TTS is used). With **no keys at all** every model
+stage uses a deterministic local stub and you still get a valid `final.mp4`
+— a good way to verify the install before adding keys.
 
 ---
 
@@ -142,6 +213,7 @@ otherwise online Gemini TTS is used).
 ```bash
 cp .env.example .env                 # fill in your keys (gitignored — never commit)
 cp config.example.yaml config.yaml   # choose models per purpose (gitignored)
+# Windows: use `copy` instead of `cp`
 ```
 
 **`.env`** holds secrets only:
@@ -162,34 +234,24 @@ proportional alignment, procedural visuals) and still emits a valid `final.mp4`.
 
 ---
 
-## Quickstart
+## Command reference
 
-### Easiest: the GUI
+The GUI (`python run.py`) and CLI (`python -m vp.run`) behave identically on
+Linux and Windows — see the run step in each OS section above. The GUI opens
+a window: enter the topic, pick quality and ~minutes, optionally tick *"let
+me read the story first"* (pauses for review with an **Approve & Continue**
+button) or *"short sample first"*. Press **Create Video** — the pipeline
+runs in a subprocess and streams progress live; the window stays responsive
+and scrollable, and a status line shows which API keys are set (names only,
+never values).
 
-```bash
-python run.py
-```
-
-Opens a window. Fill the **Core** section — what it's about, quality,
-**about how many minutes**, and tick **auto-upload** if you want it on
-YouTube. The voice style is **derived automatically from your topic** (no
-voice-direction to write). Optional: tick *"let me read the story first"*
-to pause for review (the app shows the script and an **Approve & Continue**
-button), or *"make a short sample first"* for a fast partial render. Press
-**Create Video**. The pipeline runs in a subprocess and streams progress
-live into the log pane; the window stays responsive. A status line shows
-which API keys are configured (names only — values are never read/shown).
-Needs Tkinter (`sudo apt install python3-tk` on minimal Linux).
-
-### CLI
-
-End-to-end from a topic (preview = fast 960×540, final = 1920×1080):
+CLI — `python -m vp.run "<topic>" [flags]` (preview = fast 960×540,
+final = 1920×1080):
 
 ```bash
 # fast smoke render, auto-approve the script gate:
 python -m vp.run "The 7 signs someone is quietly manipulating you" --approve
-
-# production render, ~8-minute target:
+# production render, ~8-minute target, local-only:
 python -m vp.run "The 7 signs someone is quietly manipulating you" \
     --approve --preset final --minutes 8 --no-upload
 ```
