@@ -472,3 +472,9 @@ decisions a future session must NOT "fix" back:
   seamless, voice-protected (master authoritative numbers), cost tracked
   (~$0.003/video haiku). §7 DoD fully satisfied; §8 baseline not regressed.
   **DONE.**
+- 2026-05-18 — Button/GUI E2E: ran the exact `vp.run` command the "Create
+  Video" button issues (preview, prod sonnet, full TTS+render). Produced
+  final.mp4, QA passed (incl. no_long_silence=0.00s), 1 tasteful cue
+  (impact-boom, sfx_peak 0.141 ≤ ceil 0.161), manifest+cost recorded.
+  Added GUI progress milestone `"sound design:" -> 66%` so the bar
+  advances during the new stage. Button flow seamless incl. SFX.

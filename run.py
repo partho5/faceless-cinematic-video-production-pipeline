@@ -70,6 +70,7 @@ _MILESTONES: list[tuple[str, int, str]] = [
     ("voice framing:", 48, "Deriving voice style…"),
     ("voice:", 60, "Voiceover synthesized"),
     ("timeline reflowed", 64, "Timeline built"),
+    ("sound design:", 66, "Designing sound…"),
     ("master:", 68, "Mastering audio…"),
     ("render ->", 90, "Render complete"),
     ("metadata:", 93, "Thumbnail + metadata…"),
