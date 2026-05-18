@@ -50,9 +50,10 @@ single **control JSON** so the render is fully reproducible:
 
 ```
 topic
-  → Stage 1: Claude writes the narration script
-  → review gate (optional human approve)
+  → Stage 1: Claude writes the narration script (length scaled to target minutes)
+  → review gate (optional human approve; approved script reused verbatim)
   → Stage 2: Claude segments it + emits per-segment control signals (JSON)
+  → voice framing auto-derived from the topic (soothing vs intense, etc.)
   → Gemini TTS: continuous per-chapter narration (one fixed channel voice)
   → forced alignment (stable-ts): word-level timestamps
   → lossless slicing: chapter audio → per-segment clips, cut only at word onsets
@@ -82,6 +83,10 @@ topic
 
 - **Config-driven models** — `config.yaml` names which model serves which purpose
   (script / segmentation / metadata / TTS / alignment); swap models without code changes.
+- **Length targeting** — the topic plus a target-minutes value drive Stage 1
+  (~150 wpm); chapters are scaled to fit, no manual word-counting.
+- **Auto voice direction** — TTS scene/context are derived from the topic
+  (best-effort, falls back to channel defaults), so no hand-written voice prompts.
 - **Audio-as-truth timeline** — visuals are reflowed onto measured narration, so
   captions never drift from speech.
 - **Resumable TTS cache** — each chapter's audio is hashed (text + voice + model +
@@ -165,9 +170,12 @@ proportional alignment, procedural visuals) and still emits a valid `final.mp4`.
 python run.py
 ```
 
-Opens a window. Fill the **Core** section (topic, quality, auto-approve,
-tick **auto-upload** if you want it on YouTube), optionally tweak the
-**Advanced** section (segment limit, TTS scene/context steering), press
+Opens a window. Fill the **Core** section — what it's about, quality,
+**about how many minutes**, and tick **auto-upload** if you want it on
+YouTube. The voice style is **derived automatically from your topic** (no
+voice-direction to write). Optional: tick *"let me read the story first"*
+to pause for review (the app shows the script and an **Approve & Continue**
+button), or *"make a short sample first"* for a fast partial render. Press
 **Create Video**. The pipeline runs in a subprocess and streams progress
 live into the log pane; the window stays responsive. A status line shows
 which API keys are configured (names only — values are never read/shown).
@@ -181,13 +189,22 @@ End-to-end from a topic (preview = fast 960×540, final = 1920×1080):
 # fast smoke render, auto-approve the script gate:
 python -m vp.run "The 7 signs someone is quietly manipulating you" --approve
 
-# production render:
+# production render, ~8-minute target:
 python -m vp.run "The 7 signs someone is quietly manipulating you" \
-    --approve --preset final --no-upload
+    --approve --preset final --minutes 8 --no-upload
 ```
 
-Flags: `--approve` skips the human review gate · `--preset preview|final` ·
-`--segments N` caps segments (quick tests) · `--no-upload` keeps it local-only.
+Flags:
+- `--approve` — skip the human review gate (otherwise the run pauses after
+  writing `script.md`; approve by creating a sibling `script.APPROVED`
+  file, then re-run — the approved script is reused verbatim, no regen).
+- `--preset preview|final` — 540p fast vs 1080p production.
+- `--minutes N` — approximate target length (~150 spoken words/min); the
+  script generator scales chapters to fit. Default 6.
+- `--segments N` — cap segments for quick tests.
+- `--tts-scene` / `--tts-context` — optional voice-direction overrides;
+  **omitted by default, the voice style is auto-derived from the topic**.
+- `--no-upload` — keep it local-only (upload is forced-private otherwise).
 
 ### Parameterized example scripts
 

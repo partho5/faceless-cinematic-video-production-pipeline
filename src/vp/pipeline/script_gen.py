@@ -27,13 +27,26 @@ def slugify(text: str) -> str:
 
 
 # ----------------------------------------------------------------- Stage 1 --
-_SCRIPT_SYS = (
+_SCRIPT_SYS_BASE = (
     "You are a scriptwriter for a dark-psychology YouTube channel. Voice: "
     "low, controlled, second-person, knowledge-gap hooks, retention beats. "
     "Write narration ONLY (no stage directions). Mark chapters as "
-    "'**[HOOK · m:ss–m:ss]**', '**[SIGN N · ...]**', '**[CLOSING · ...]**'. "
-    "Target ~150 spoken words/min, ~900 words for ~6 minutes."
+    "'**[HOOK · m:ss–m:ss]**', '**[SIGN N · ...]**', '**[CLOSING · ...]**'."
 )
+
+_WPM = 150  # calm spoken pace; words ≈ minutes × WPM
+
+
+def _script_sys(target_minutes: float) -> str:
+    m = max(0.5, float(target_minutes))
+    words = int(round(m * _WPM))
+    return (
+        _SCRIPT_SYS_BASE
+        + f" Target ~{_WPM} spoken words per minute. The full narration "
+        f"should run about {m:g} minute(s) read aloud — roughly {words} "
+        f"words. Get close, it need not be exact. Scale the number of "
+        f"chapters/beats to fill that length naturally (don't pad or rush)."
+    )
 
 
 class ScriptStage:
@@ -41,24 +54,30 @@ class ScriptStage:
         self.cfg = cfg
         self.spec = cfg.model("script_generation")
 
-    def _anthropic(self, topic: str) -> str:
+    def _anthropic(self, topic: str, target_minutes: float) -> str:
         from ..llm import anthropic_message  # lazy
 
         return anthropic_message(
-            self.spec, system=_SCRIPT_SYS,
+            self.spec, system=_script_sys(target_minutes),
             user=f"Write the full script for: {topic}",
         )
 
-    def generate(self, topic: str, out_dir: Path) -> Path:
+    def generate(self, topic: str, out_dir: Path,
+                 target_minutes: float = 6.0) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / "script.md"
+        # If the user already reviewed AND approved this exact script, keep
+        # it verbatim: the script they read is the script that gets rendered,
+        # and the approve->continue re-run costs zero extra API spend.
+        if path.exists() and (out_dir / "script.APPROVED").exists():
+            return path
         if self.spec.offline:
             script = (f"# {topic}\n\n" + sample_script_markdown())
         else:
             try:
-                script = self._anthropic(topic)
+                script = self._anthropic(topic, target_minutes)
             except Exception:
                 script = f"# {topic}\n\n" + sample_script_markdown()
-        path = out_dir / "script.md"
         path.write_text(script, encoding="utf-8")
         return path
 

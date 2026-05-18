@@ -34,7 +34,8 @@ def _log(msg: str) -> None:
 
 def run(topic: str, *, preset: str = "preview", approve: bool = False,
         segments: int | None = None, do_upload: bool = True,
-        tts_scene: str | None = None, tts_context: str | None = None) -> dict:
+        tts_scene: str | None = None, tts_context: str | None = None,
+        target_minutes: float = 6.0) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -45,11 +46,14 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     _log(f"output dir: {out}")
 
     # 1. Stage 1 + review gate
-    script_path = ScriptStage(cfg).generate(topic, out)
-    _log(f"stage1 script -> {script_path.name}")
+    script_path = ScriptStage(cfg).generate(topic, out,
+                                             target_minutes=target_minutes)
+    _log(f"stage1 script -> {script_path.name} (~{target_minutes:g} min target)")
     if not review_gate(script_path, auto_approve=approve):
-        _log("review gate: NOT approved (create script.APPROVED or pass "
-             "--approve). Stopping before TTS/render spend.")
+        _log("review gate: NOT approved. Read the script, then approve to "
+             "continue (the GUI shows an Approve button; CLI: create the "
+             "file 'script.APPROVED' next to script.md, or pass --approve).")
+        _log(f"REVIEW_REQUIRED {script_path}")
         return {"status": "awaiting_review", "script": str(script_path)}
 
     # 2. Stage 2 -> validated control doc
@@ -66,6 +70,13 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     # 3. VOICE (continuous per-chapter read, sliced per segment) -> align
     from .pipeline.voice import VoiceStage
 
+    if not (tts_scene and tts_context):
+        from .llm import tts_framing
+        fr = tts_framing(cfg.model("metadata_text"), topic)
+        if fr:
+            tts_scene = tts_scene or fr[0]
+            tts_context = tts_context or fr[1]
+            _log("voice framing: auto-derived from topic")
     _vs = VoiceStage(cfg)
     if tts_scene:
         _vs.scene = tts_scene
@@ -156,10 +167,13 @@ def main(argv=None) -> int:
                     help="override TTS scene framing (per-niche steering)")
     ap.add_argument("--tts-context", default=None,
                     help="override TTS context framing (per-niche steering)")
+    ap.add_argument("--minutes", type=float, default=6.0,
+                    help="approx target video length in minutes (~150 wpm)")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
-            tts_scene=a.tts_scene, tts_context=a.tts_context)
+            tts_scene=a.tts_scene, tts_context=a.tts_context,
+            target_minutes=a.minutes)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 
