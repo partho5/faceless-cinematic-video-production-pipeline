@@ -114,17 +114,20 @@ class App:
         self.out_dir: Path | None = None
         self.review_script: Path | None = None
         self.review_pending = False
-        self._pct = 0
-        self._pulsing = False
+        self._pct = 0          # logical target %
+        self._disp = 0         # currently displayed % (animated toward target)
+        self._anim_job = None
+        self._creep_job = None
 
         master.title("Video Production Studio")
         master.geometry("880x860")
-        master.minsize(760, 720)
+        # small min size: the whole UI is scrollable, so it stays usable
+        # (nothing hidden) even when the window is shrunk a lot.
+        master.minsize(560, 380)
         master.configure(bg=T.BG)
 
         self._init_style()
-        body = ttk.Frame(master, style="App.TFrame")
-        body.pack(fill="both", expand=True, padx=22, pady=18)
+        body = self._scrollable(master)
 
         self._build_header(body)
         self._build_content(body)
@@ -137,6 +140,103 @@ class App:
         self._build_log(body)
 
         self.master.after(120, self._drain)
+
+    # -- scrollable shell --------------------------------------------------
+    def _scrollable(self, master) -> ttk.Frame:
+        """A vertically scrollable container.
+
+        Everything is built inside the returned frame, so the whole UI
+        (including anything added in the future) scrolls and nothing is
+        ever clipped when the window is small. Content width tracks the
+        viewport so the layout stays responsive.
+        """
+        outer = ttk.Frame(master, style="App.TFrame")
+        outer.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(outer, bg=T.BG, highlightthickness=0, bd=0)
+        vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = ttk.Frame(canvas, style="App.TFrame")
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _fit(_evt=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # only show the scrollbar when content overflows
+            need = inner.winfo_reqheight() > canvas.winfo_height()
+            vsb.pack_forget() if not need else vsb.pack(
+                side="right", fill="y", before=canvas)
+
+        inner.bind("<Configure>", _fit)
+        canvas.bind("<Configure>",
+                    lambda e: (canvas.itemconfigure(win, width=e.width),
+                               _fit()))
+
+        def _wheel(e):
+            # let the log pane (its own scrollbar) keep the wheel when
+            # the pointer is over it; otherwise scroll the page
+            w = e.widget
+            while w is not None:
+                if w is getattr(self, "log", None):
+                    return
+                w = getattr(w, "master", None)
+            step = 1 if (getattr(e, "num", 0) == 5 or e.delta < 0) else -1
+            canvas.yview_scroll(step, "units")
+
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind_all(seq, _wheel)
+
+        pad = ttk.Frame(inner, style="App.TFrame")
+        pad.pack(fill="both", expand=True, padx=22, pady=18)
+        return pad
+
+    # -- custom checkbox tick ---------------------------------------------
+    def _check_images(self) -> tuple[tk.PhotoImage, tk.PhotoImage]:
+        """Two indicator images (unticked box / ticked box with a ✓).
+
+        Drawn pixel-wise with PhotoImage so it renders identically on any
+        Tk build (no theme glyphs, no PIL). W has a few trailing panel-
+        coloured columns acting as the gap before the label.
+        """
+        W, H = 22, 16
+
+        def grid(bg):
+            return [[bg] * W for _ in range(H)]
+
+        def box(g, edge, fill):
+            for y in range(2, 14):
+                for x in range(2, 14):
+                    g[y][x] = fill
+            for i in range(2, 14):
+                g[2][i] = g[13][i] = edge
+                g[i][2] = g[i][13] = edge
+
+        def seg(g, x0, y0, x1, y1, col, t=2):
+            n = max(abs(x1 - x0), abs(y1 - y0))
+            for s in range(n + 1):
+                x = round(x0 + (x1 - x0) * s / n)
+                y = round(y0 + (y1 - y0) * s / n)
+                for dy in range(t):
+                    for dx in range(t):
+                        xx, yy = x + dx, y + dy
+                        if 0 <= xx < W and 0 <= yy < H:
+                            g[yy][xx] = col
+
+        def make(g):
+            img = tk.PhotoImage(width=W, height=H)
+            for y, row in enumerate(g):
+                img.put("{" + " ".join(row) + "}", to=(0, y))
+            return img
+
+        off = grid(T.PANEL)
+        box(off, T.BORDER, T.INPUT)
+        on = grid(T.PANEL)
+        box(on, T.ACCENT, T.ACCENT)
+        seg(on, 4, 8, 7, 11, "#FFFFFF")
+        seg(on, 7, 11, 12, 4, "#FFFFFF")
+        return make(off), make(on)
 
     # -- styling -----------------------------------------------------------
     def _init_style(self) -> None:
@@ -188,6 +288,29 @@ class App:
                 bordercolor=[("selected", T.ACCENT),
                              ("focus", T.ACCENT)],
             )
+
+        # Custom checkbox indicator: the clam theme draws an "✗" for a
+        # selected checkbutton — replace it with a hand-drawn box that
+        # shows a real ✓ tick when ticked. Used via "Switch.TCheckbutton".
+        self._ck_off, self._ck_on = self._check_images()
+        try:
+            st.element_create("VPcheck", "image", self._ck_off,
+                              ("selected", self._ck_on), sticky="")
+            st.layout("Switch.TCheckbutton", [
+                ("Checkbutton.padding", {"sticky": "nswe", "children": [
+                    ("VPcheck", {"side": "left", "sticky": ""}),
+                    ("Checkbutton.focus", {"side": "left", "sticky": "",
+                     "children": [("Checkbutton.label", {"sticky": "nswe"})]}),
+                ]}),
+            ])
+            st.configure("Switch.TCheckbutton", background=T.PANEL,
+                         foreground=T.FG, font=self.f_base, padding=(0, 3))
+            st.map("Switch.TCheckbutton",
+                   background=[("active", T.PANEL)],
+                   foreground=[("disabled", T.MUTED)])
+        except tk.TclError:
+            pass  # element already created (style re-init) — keep existing
+
         st.configure("TEntry", fieldbackground=T.INPUT, foreground=T.FG,
                      bordercolor=T.BORDER, insertcolor=T.FG,
                      lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
@@ -279,14 +402,14 @@ class App:
         self.upload = tk.BooleanVar(value=False)
         self.review = tk.BooleanVar(value=False)
         self.sample = tk.BooleanVar(value=False)
-        ttk.Checkbutton(o, variable=self.upload,
+        ttk.Checkbutton(o, variable=self.upload, style="Switch.TCheckbutton",
                         text="Upload to my YouTube (stays PRIVATE)").grid(
             row=2, column=0, columnspan=3, sticky="w", pady=(10, 1))
-        ttk.Checkbutton(o, variable=self.review,
+        ttk.Checkbutton(o, variable=self.review, style="Switch.TCheckbutton",
                         text="Let me read & approve the story before render"
                         ).grid(row=3, column=0, columnspan=3, sticky="w",
                                pady=1)
-        ttk.Checkbutton(o, variable=self.sample,
+        ttk.Checkbutton(o, variable=self.sample, style="Switch.TCheckbutton",
                         text="Short sample first (opening only — faster)"
                         ).grid(row=4, column=0, columnspan=3, sticky="w",
                                pady=1)
@@ -352,27 +475,53 @@ class App:
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    def _cancel(self, attr: str) -> None:
+        job = getattr(self, attr, None)
+        if job is not None:
+            try:
+                self.master.after_cancel(job)
+            except Exception:
+                pass
+            setattr(self, attr, None)
+
     def _set_pct(self, pct: int, stage: str | None = None) -> None:
+        """Set the target %. Forward-only; the bar then animates to it so
+        every intermediate number is shown (no 68 -> 90 jumps)."""
         pct = max(0, min(100, int(pct)))
-        if self._pulsing:
-            self.bar.stop()
-            self.bar.configure(mode="determinate")
-            self._pulsing = False
-        if pct < self._pct:
-            return
-        self._pct = pct
-        self.bar.configure(value=pct)
-        self.pct_lbl.configure(
-            text=f"{pct}%", foreground=(T.OK if pct >= 100 else T.FG))
         if stage:
             self.stage_lbl.configure(text=stage)
+        if pct <= self._pct:
+            return
+        self._pct = pct
+        self._cancel("_creep_job")     # a real milestone supersedes the creep
+        self._animate()
 
-    def _pulse(self, stage: str) -> None:
-        if not self._pulsing:
-            self.bar.configure(mode="indeterminate")
-            self.bar.start(14)
-            self._pulsing = True
-        self.stage_lbl.configure(text=stage)
+    def _animate(self) -> None:
+        """Step the displayed % one unit toward the target, ~60 fps."""
+        self._cancel("_anim_job")
+        if self._disp < self._pct:
+            self._disp += 1
+            self.bar.configure(value=self._disp)
+            self.pct_lbl.configure(
+                text=f"{self._disp}%",
+                foreground=(T.OK if self._disp >= 100 else T.FG))
+            self._anim_job = self.master.after(16, self._animate)
+
+    def _creep(self, ceiling: int, period: int = 2000) -> None:
+        """Gently raise the target during a long, log-silent step (render
+        emits nothing between 'master:' and 'render ->'). Walks +1 every
+        `period` ms up to `ceiling`; a real milestone cancels it."""
+        self._cancel("_creep_job")
+
+        def step():
+            if self._pct < ceiling:
+                self._pct += 1
+                self._animate()
+                self._creep_job = self.master.after(period, step)
+            else:
+                self._creep_job = None
+
+        self._creep_job = self.master.after(period, step)
 
     def _scan(self, line: str) -> None:
         s = line.strip()
@@ -395,9 +544,12 @@ class App:
         for needle, pct, stage in _MILESTONES:
             if needle in s:
                 self._set_pct(pct, stage)
-                # render is the long, log-silent step: pulse until it returns
+                # render is the long, log-silent step: creep the % up
+                # gently (≈68 -> 89) instead of freezing until it returns
                 if needle == "master:":
-                    self._pulse("Rendering 1080p — longest step…")
+                    self.stage_lbl.configure(
+                        text="Rendering 1080p — longest step…")
+                    self._creep(89)
                 break
 
     def _drain(self) -> None:
@@ -450,10 +602,9 @@ class App:
         self.review_script = None
         self.review_pending = False
         self._pct = 0
-        if self._pulsing:
-            self.bar.stop()
-            self.bar.configure(mode="determinate")
-            self._pulsing = False
+        self._disp = 0
+        self._cancel("_anim_job")
+        self._cancel("_creep_job")
         self.bar.configure(value=0)
         self.pct_lbl.configure(text="0%", foreground=T.FG)
         self.stage_lbl.configure(text="starting…")
@@ -522,9 +673,12 @@ class App:
                 f"Edit {self.review_script} if you want, then press "
                 f"'Approve & Continue'.\n")
         else:
+            self._cancel("_creep_job")
             done = self._pct >= 100
-            self._set_pct(100 if done else self._pct,
-                          "Finished" if done else "Stopped")
+            if done:
+                self._set_pct(100, "Finished")
+            else:
+                self.stage_lbl.configure(text="Stopped")
             self._append(
                 "\n✅ Finished — see output/<slug>/final.mp4\n" if done
                 else "\n■ Process ended.\n")
