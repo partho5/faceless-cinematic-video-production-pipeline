@@ -159,6 +159,22 @@ proportional alignment, procedural visuals) and still emits a valid `final.mp4`.
 
 ## Quickstart
 
+### Easiest: the GUI
+
+```bash
+python run.py
+```
+
+Opens a window. Fill the **Core** section (topic, quality, auto-approve,
+tick **auto-upload** if you want it on YouTube), optionally tweak the
+**Advanced** section (segment limit, TTS scene/context steering), press
+**Create Video**. The pipeline runs in a subprocess and streams progress
+live into the log pane; the window stays responsive. A status line shows
+which API keys are configured (names only — values are never read/shown).
+Needs Tkinter (`sudo apt install python3-tk` on minimal Linux).
+
+### CLI
+
 End-to-end from a topic (preview = fast 960×540, final = 1920×1080):
 
 ```bash

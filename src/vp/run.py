@@ -33,7 +33,8 @@ def _log(msg: str) -> None:
 
 
 def run(topic: str, *, preset: str = "preview", approve: bool = False,
-        segments: int | None = None, do_upload: bool = True) -> dict:
+        segments: int | None = None, do_upload: bool = True,
+        tts_scene: str | None = None, tts_context: str | None = None) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -65,7 +66,12 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     # 3. VOICE (continuous per-chapter read, sliced per segment) -> align
     from .pipeline.voice import VoiceStage
 
-    vr = VoiceStage(cfg).synthesize(doc, out / "audio")
+    _vs = VoiceStage(cfg)
+    if tts_scene:
+        _vs.scene = tts_scene
+    if tts_context:
+        _vs.context = tts_context
+    vr = _vs.synthesize(doc, out / "audio")
     _log(f"voice: {vr.chapters} chapters -> {vr.segments} segment slices "
          f"(keys={vr.key_count}, offline={vr.offline})")
     aligns = {}
@@ -146,9 +152,14 @@ def main(argv=None) -> int:
     ap.add_argument("--segments", type=int, default=None,
                     help="limit number of segments (quick runs)")
     ap.add_argument("--no-upload", action="store_true")
+    ap.add_argument("--tts-scene", default=None,
+                    help="override TTS scene framing (per-niche steering)")
+    ap.add_argument("--tts-context", default=None,
+                    help="override TTS context framing (per-niche steering)")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
-            segments=a.segments, do_upload=not a.no_upload)
+            segments=a.segments, do_upload=not a.no_upload,
+            tts_scene=a.tts_scene, tts_context=a.tts_context)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 
