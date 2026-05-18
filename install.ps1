@@ -1,10 +1,16 @@
-# Production bootstrap launcher — Windows (plan §5).
+﻿# Production bootstrap launcher - Windows (plan section 5).
 #
 # ONE job: guarantee a Python >= 3.10 exists (downloading + silently
 # installing it, PATH-registered, if absent), then hand off to the brain
 # install.py (stdlib-only) which does the real audit/install/verify.
 # Order: existing Python  ->  winget  ->  signature-verified python.org
 # installer (per-user, no admin).  All args forward verbatim to install.py.
+#
+# IMPORTANT: this file must be saved as UTF-8 *with BOM* and contain only
+# ASCII characters in code. Windows PowerShell 5.1 (shipped on every
+# Win10/11 by default) reads BOM-less files as the system ANSI codepage
+# (cp1252 on most installs). Any non-ASCII byte then desyncs string
+# parsing and the whole script fails to load. Keep this file ASCII-only.
 
 $ErrorActionPreference = 'Stop'
 $Root   = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -60,7 +66,7 @@ function Find-Py {
 function Install-Python {
   # 1) winget (MS-validated manifest; sets PATH)
   if (Get-Command winget -ErrorAction SilentlyContinue) {
-    Info "Installing Python via winget (no admin needed)…"
+    Info "Installing Python via winget (no admin needed)..."
     try {
       winget install -e --id Python.Python.3.12 --scope user --silent `
         --accept-source-agreements --accept-package-agreements | Out-Null
@@ -87,7 +93,7 @@ function Install-Python {
     return $null
   }
   Ok  "  signature verified (Python Software Foundation)"
-  Info "Installing Python silently (per-user, PATH-registered, with Tk)…"
+  Info "Installing Python silently (per-user, PATH-registered, with Tk)..."
   $instArgs = '/quiet InstallAllUsers=0 PrependPath=1 Include_tcltk=1 ' +
               'Include_pip=1 Include_launcher=1 SimpleInstall=1 ' +
               'SimpleInstallDescription="Video Production toolchain"'
@@ -98,7 +104,7 @@ function Install-Python {
 }
 
 # --- orchestrate ---------------------------------------------------------
-Info "Video Production — bootstrap (Windows)"
+Info "Video Production - bootstrap (Windows)"
 $py = Find-Py
 if (-not $py) {
   $py = Install-Python

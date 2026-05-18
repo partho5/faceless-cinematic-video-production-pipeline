@@ -295,14 +295,19 @@ def venv_python() -> Path:
 
 def installed_versions(py: Path) -> dict:
     """name(lower) -> version, from the *target* interpreter (stdlib only
-    on its side, so this works even in a barebones venv)."""
+    on its side, so this works even in a barebones venv). Skips dists
+    with a missing Name (a partial/corrupted install record would
+    otherwise crash the probe and silently mask real state)."""
     code = ("import json\n"
             "try:\n"
             " from importlib import metadata as m\n"
             "except Exception:\n"
             " import importlib_metadata as m\n"
-            "print(json.dumps({d.metadata['Name'].lower(): d.version "
-            "for d in m.distributions()}))")
+            "out={}\n"
+            "for d in m.distributions():\n"
+            " n=(d.metadata or {}).get('Name')\n"
+            " if n: out[n.lower()]=d.version\n"
+            "print(json.dumps(out))")
     rc, out, _ = run([str(py), "-c", code])
     if rc == 0 and out.strip().startswith("{"):
         try:
@@ -374,35 +379,49 @@ def audit(args) -> Report:
           f"{platform.python_version()} @ {sys.executable}",
           "" if pv >= MIN_PY else f"need >= {MIN_PY[0]}.{MIN_PY[1]}")
 
-    # project venv
+    # project venv. Two failure modes we must catch here, because both
+    # show up in the wild after an interrupted install or a corrupted
+    # write: (a) python.exe itself broken, (b) the venv's bundled pip
+    # has null-byte-corrupted files — a working python BUT pip crashes
+    # the moment it's invoked. Both look fine to a naive "does python
+    # run?" probe, then explode mid-install. So we probe pip too.
     vp = venv_python()
     if vp.exists():
         rc, out, _ = run([str(vp), "-c",
                           "import sys;print('%d.%d'%sys.version_info[:2])"])
         if rc == 0:
             vok = tuple(map(int, out.strip().split("."))) >= MIN_PY
-            r.add(".venv", OK if vok else OUTDATED,
-                  f"{out.strip()} @ {VENV_DIR}",
-                  "" if vok else "venv python too old — will rebuild")
+            if not vok:
+                r.add(".venv", OUTDATED, f"{out.strip()} @ {VENV_DIR}",
+                      "venv python too old — will rebuild")
+            else:
+                rc_pip, _, _ = run([str(vp), "-m", "pip", "--version"])
+                if rc_pip == 0:
+                    r.add(".venv", OK, f"{out.strip()} @ {VENV_DIR}")
+                else:
+                    r.add(".venv", BROKEN,
+                          f"{out.strip()} @ {VENV_DIR}; pip unusable",
+                          "will rebuild")
         else:
             r.add(".venv", BROKEN, "exists but not runnable",
                   "will rebuild")
     else:
         r.add(".venv", MISSING, "not created", "will create")
 
-    # tools
+    # tools. git is intentionally not audited: it's only needed for the
+    # one-time `git clone` step BEFORE install.bat is run; once the user
+    # is running the installer they already have the repo on disk, so a
+    # missing-git "warning" is pure noise that scares non-technical users.
     for tool, probe, required in (
         ("ffmpeg", ["ffmpeg", "-version"], True),
         ("ffprobe", ["ffprobe", "-version"], True),
-        ("git", ["git", "--version"], False),
     ):
         if which(probe[0]):
             r.add(tool, OK, cmd_ver(probe) or "present")
         else:
             r.add(tool, MISSING if required else WARN_,
                   "not on PATH",
-                  "install (mandatory)" if required
-                  else "optional (only for `git clone`)")
+                  "install (mandatory)" if required else "optional")
 
     # tkinter (GUI). Probe the bootstrap python; venv inherits it.
     rc, _, _ = run([sys.executable, "-c", "import tkinter"])
@@ -499,13 +518,19 @@ def download(url: str, dest: Path, prog: Progress | None = None,
 
 
 def ensure_venv(base_py: str) -> bool:
-    """Create/repair .venv from base_py; upgrade pip/setuptools/wheel."""
+    """Create/repair .venv from base_py; upgrade pip/setuptools/wheel.
+    Treats a venv whose pip can't be invoked (corrupted pyc/py with
+    null bytes — seen after interrupted installs) as broken and rebuilds
+    it. Without this check, pip crashes mid-install with a confusing
+    'source code string cannot contain null bytes' traceback."""
     vp = venv_python()
     if vp.exists():
         rc, out, _ = run([str(vp), "-c",
                           "import sys;print(sys.version_info[:2]>=%s)"
                           % repr(MIN_PY)])
-        if rc == 0 and "True" in out:
+        rc_pip, _, _ = run([str(vp), "-m", "pip", "--version"]) \
+            if (rc == 0 and "True" in out) else (1, "", "")
+        if rc == 0 and "True" in out and rc_pip == 0:
             return True
         log("venv broken/old — rebuilding", "WARN")
         shutil.rmtree(VENV_DIR, ignore_errors=True)
@@ -831,14 +856,16 @@ def main(argv=None) -> int:
 
     say("")
     if worst == "READY" and ok and code == EXIT_OK:
-        say(f"{Con.G}{Con.BOLD}✓ Ready.{Con.X}  Run the app:")
-        say(f"    {Con.BOLD}{venv_python()} run.py{Con.X}   (GUI)")
-        say(f"    or: {venv_python()} -m vp.run \"<topic>\" --approve")
-        return EXIT_OK
-    for nte in notes:
-        say(f"  {Con.WARN} {nte}")
-    say(f"{Con.Y}Completed with warnings — usable, see notes above.{Con.X}")
-    return EXIT_WARN
+        say(f"{Con.G}{Con.BOLD}{Con.OK} Ready.{Con.X}  Run the app:")
+    else:
+        for nte in notes:
+            say(f"  {Con.WARN} {nte}")
+        say(f"{Con.Y}Completed with warnings - usable. "
+            f"Run the app:{Con.X}")
+    say(f"    {Con.BOLD}{venv_python()} run.py{Con.X}   (GUI)")
+    say(f"    or: {venv_python()} -m vp.run \"<topic>\" --approve")
+    return EXIT_OK if (worst == "READY" and ok and code == EXIT_OK) \
+        else EXIT_WARN
 
 
 if __name__ == "__main__":
