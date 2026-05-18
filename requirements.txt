@@ -1,0 +1,20 @@
+# --- core pipeline (required for offline render) ---
+numpy>=1.26
+Pillow>=10.2
+PyYAML>=6.0
+requests>=2.31
+moviepy>=1.0.3
+pydub>=0.25.1
+opencv-python-headless>=4.9
+
+# --- model/service clients (lazy-imported; only needed when keys present) ---
+anthropic>=0.40            # Stage 1/2 script + control JSON, metadata
+google-genai>=0.8          # Gemini TTS
+google-api-python-client   # YouTube Data API v3 upload
+google-auth-oauthlib       # YouTube OAuth consent helper
+
+# --- forced alignment (heavy; lazy-imported, offline fallback otherwise) ---
+stable-ts>=2.17            # pulls torch + whisper; real word alignment
+
+# --- dev ---
+pytest>=8.0

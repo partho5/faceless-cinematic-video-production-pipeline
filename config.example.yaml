@@ -1,0 +1,52 @@
+# Copy to config.yaml. Defines WHICH model is used for WHICH purpose.
+# Each purpose is independent — swap models per purpose without touching code.
+# Secrets stay in .env; this file only names providers/models/params.
+
+models:
+
+  # Stage 1: topic -> full narration script (creative, high quality)
+  script_generation:
+    provider: anthropic
+    model: claude-opus-4-7
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 4000, temperature: 0.9 }
+
+  # Stage 2: approved script -> segmentation + control-signal JSON
+  # (structured, per-chapter; see planning/09 + planning/04)
+  segmentation_direction:
+    provider: anthropic
+    model: claude-opus-4-7        # swap to claude-sonnet-4-6 to cut cost
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 8000, temperature: 0.4 }
+
+  # Title variants / description / tags / chapters
+  metadata_text:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 1500, temperature: 0.8 }
+
+  # Thumbnail. mode: frame_compose = pick best video frame + Pillow text
+  # (no model). mode: image_gen = generate a background via image model.
+  thumbnail_image:
+    mode: frame_compose
+    image_gen:
+      provider: google
+      model: gemini-2.5-flash-image   # used only when mode: image_gen
+      api_key_env: GEMINI_API_KEY
+
+  # Voiceover (audio generation) — per-segment scene+delivery prompts
+  tts_audio:
+    provider: google
+    model: gemini-2.5-pro-preview-tts   # verify current id at build
+    api_key_env: GEMINI_API_KEY
+    voice_name: Charon                  # one fixed voice for the channel
+    params: { temperature: 1.0 }
+
+  # Word-level timing — local, no API. See planning/06.
+  forced_alignment:
+    provider: local
+    engine: stable-ts
+    model: base            # base|small|medium ; fallback engine: mfa
+
+# Non-model services (keys in .env): PEXELS_API_KEY, YT_* (optional).

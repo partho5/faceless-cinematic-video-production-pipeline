@@ -1,0 +1,35 @@
+# secrets
+.env
+config.yaml
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# build outputs / caches
+output/
+.cache/
+assets/clips_cache/
+
+# downloaded asset bodies (specs/manifests kept, binaries ignored)
+assets/fonts/*.ttf
+assets/fonts/*.otf
+assets/luts/*.cube
+assets/music/*.wav
+assets/music/*.mp3
+assets/sfx/*.wav
+assets/sfx/*.mp3
+assets/tts_voices/*.onnx
+
+# moviepy render temp artifacts
+*TEMP_MPY_*.mp4
+*TEMP_MPY_*.mp3
+
+# IDE / OS
+.idea/
+.DS_Store
