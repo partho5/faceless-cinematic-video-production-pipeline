@@ -103,6 +103,18 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     tl = reflow(doc.segments)
     _log(f"timeline reflowed (G1): {tl.total_duration:.2f}s")
 
+    # 5b. editorial sound design — one restraint-trained LLM pass picks at
+    #     most a few cues from the curated 20 (usually none) and resolves
+    #     them onto the aligned word timings. Mutates doc.segments.sound_fx.
+    from .pipeline.sound_design import SoundDesigner
+
+    sd = SoundDesigner(cfg).design(doc, aligns)
+    _log(f"sound design: {sd['n_cues']} cue(s), {sd['n_dropped']} dropped "
+         f"(model={sd['model']}{', offline' if sd['offline'] else ''})")
+    for c in sd["cues"]:
+        _log(f"  sfx {c['sfx_id']} @ {c['segment_id']} +{c['at_s']:.2f}s "
+             f"[{c['intensity']}] — {c['reason']}")
+
     # 6. master audio
     master = build_master(doc.segments, out / "master.wav", doc.video_meta)
     _log(f"master: {master['duration']:.2f}s, {len(master['sfx_events'])} sfx")
@@ -149,6 +161,11 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         "alignment_method": next(iter(aligns.values())).method,
         "script_stage_offline": ScriptStage(cfg).spec.offline,
         "segmentation_offline": SegmentStage(cfg).spec.offline,
+        "sound_design": {
+            "n_cues": sd["n_cues"], "n_dropped": sd["n_dropped"],
+            "offline": sd["offline"], "model": sd["model"],
+            "cues": sd["cues"],
+        },
         # true if ANY stage fell back to a stub (drives the cost note, G14)
         "any_stub": vr.offline
         or next(iter(aligns.values())).method == "proportional",

@@ -82,7 +82,8 @@ class Config:
     # purposes whose model is overridable via the VP_LLM_MODEL env var
     # (dev cost lever: e.g. claude-haiku-4-5-20251001). Prod = config.yaml
     # default (claude-sonnet-4-6); leave VP_LLM_MODEL unset in prod.
-    _LLM_OVERRIDE_PURPOSES = ("script_generation", "segmentation_direction")
+    _LLM_OVERRIDE_PURPOSES = ("script_generation", "segmentation_direction",
+                              "sound_design")
     _LLM_OVERRIDE_ENV = "VP_LLM_MODEL"
 
     # -- model resolution ----------------------------------------------------

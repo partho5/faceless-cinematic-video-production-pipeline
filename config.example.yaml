@@ -19,6 +19,16 @@ models:
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 8000, temperature: 0.4 }
 
+  # Editorial sound design: approved doc + voice alignment -> sparse SFX
+  # cues from the curated 20-effect palette (plan/build-sound-effects.md).
+  # Low temperature: the job is RESTRAINT and consistency, not creativity.
+  # prod default sonnet-4-6; dev: VP_LLM_MODEL overrides (see config.py).
+  sound_design:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 2000, temperature: 0.2 }
+
   # Title variants / description / tags / chapters
   metadata_text:
     provider: anthropic

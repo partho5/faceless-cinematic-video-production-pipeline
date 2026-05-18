@@ -184,3 +184,55 @@ def validate(
             r.warnings.append(f"{s.id}: grade '{g}' not in global_assets.luts (synth LUT)")
 
     return r
+
+
+# --------------------------------------------------------- SFX cue safety ----
+# Safety #1 of 2 (plan §1.3): "must-be-one-of-20" anti-hallucination check.
+# Pure (no I/O, no alignment) so it is trivially unit-testable; anchor->time
+# resolution lives in pipeline/sound_design.py where the alignments exist.
+SFX_INTENSITIES = ("soft", "normal", "hard")
+
+
+def validate_sfx_cues(
+    cues: list[dict], allowed_ids: set[str]
+) -> tuple[list[dict], list[str]]:
+    """Filter raw SoundDesigner cues to a safe set.
+
+    Contract (plan §4.3):
+      - Drop any cue whose `sfx_id` is NOT a catalog id. **No substitution,
+        no nearest-category, no synthesis** — silence beats a wrong sound.
+      - Clamp `intensity` to {soft,normal,hard}; default/unknown -> 'normal'.
+      - NO count cap. Restraint is the prompt's job (§1.2), never a
+        mechanical rule. Returns every in-vocabulary cue unchanged.
+
+    Returns (kept_cues, warnings). Each warning is a one-line audit string;
+    the caller logs them (the drop is silent to the *render*, never silent
+    to the *log*).
+    """
+    kept: list[dict] = []
+    warns: list[str] = []
+    for i, c in enumerate(cues):
+        if not isinstance(c, dict):
+            warns.append(f"sfx cue #{i}: not an object -> dropped")
+            continue
+        sid = c.get("sfx_id")
+        if sid not in allowed_ids:
+            warns.append(
+                f"sfx cue #{i}: sfx_id={sid!r} not in catalog -> dropped "
+                f"(no substitution)"
+            )
+            continue
+        if not c.get("segment_id"):
+            warns.append(f"sfx cue #{i} ({sid}): no segment_id -> dropped")
+            continue
+        c = dict(c)
+        inten = c.get("intensity")
+        if inten not in SFX_INTENSITIES:
+            if inten is not None:
+                warns.append(
+                    f"sfx cue #{i} ({sid}): intensity={inten!r} unknown "
+                    f"-> 'normal'"
+                )
+            c["intensity"] = "normal"
+        kept.append(c)
+    return kept, warns

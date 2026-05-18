@@ -377,44 +377,98 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done & checked.
 
 ### Checklist (ordered for dependency, not strict)
 
-- [ ] **S0** Read this whole file; confirm `assets/sfx/catalog.json` has 20
+- [x] **S0** Read this whole file; confirm `assets/sfx/catalog.json` has 20
   ids and the WAVs exist (do NOT regenerate). — *check: catalog loads, 20 ids*
-- [ ] **S1** `src/vp/pipeline/sound_design.py` (new): catalog loader +
+- [x] **S1** `src/vp/pipeline/sound_design.py` (new): catalog loader +
   SoundDesigner LLM call routed via `llm.py:anthropic_message`
   (purpose `sound_design`) + output parse + cue→time resolution from
   alignments. (§4.1, §4.2)
-- [ ] **S2** Prompt authored in `sound_design.py` per §4.5 (persona, palette
+- [x] **S2** Prompt authored in `sound_design.py` per §4.5 (persona, palette
   w/ purpose, principles §3, ≥2 GOOD + ≥2 BAD few-shots, per-scene
   self-check, strict-JSON contract, empty-cues encouraged). — *the product;
   spend the most effort here*
-- [ ] **S3** `src/vp/schema/model.py`: resolved-cue representation (catalog-id
+- [x] **S3** `src/vp/schema/model.py`: resolved-cue representation (catalog-id
   `type`, `intensity`, resolved `timing`). (§5)
-- [ ] **S4** `src/vp/schema/validator.py`: must-be-one-of-20 drop (no
+- [x] **S4** `src/vp/schema/validator.py`: must-be-one-of-20 drop (no
   substitution, log), intensity clamp, anchor→time resolution, no count cap.
   (§4.3)
-- [ ] **S5** `src/vp/pipeline/script_gen.py`: remove `sound_fx` from
+- [x] **S5** `src/vp/pipeline/script_gen.py`: remove `sound_fx` from
   `_SEG_SYS`; strip/ignore legacy entries. (§5)
-- [ ] **S6** `src/vp/pipeline/master.py`: intensity→relative-gain +
+- [x] **S6** `src/vp/pipeline/master.py`: intensity→relative-gain +
   can't-bury-voice clamp + optional music-only duck; keep
   `rendered`/`sfx_skipped` logs; add chosen-cue log. Timeline immutable. (§4.4)
-- [ ] **S7** `src/vp/run.py`: call SoundDesigner after Stage-2 validation +
+- [x] **S7** `src/vp/run.py`: call SoundDesigner after Stage-2 validation +
   voice alignment; feed cues to `build_master`; `[vp]` progress lines; cue
   summary+count in manifest. (§5)
-- [ ] **S8** `src/vp/config.py` / `config.yaml`: optional `sound_design` model
+- [x] **S8** `src/vp/config.py` / `config.yaml`: optional `sound_design` model
   purpose; honor `VP_LLM_MODEL` dev override. (§4.5)
-- [ ] **S9** Unit tests per §6 (catalog, off-id drop, on_word + fallback,
+- [x] **S9** Unit tests per §6 (catalog, off-id drop, on_word + fallback,
   can't-bury-voice clamp, empty-cues byte-stable). All green, no network.
-- [ ] **S10** E2E verification: 2–3 short clips, varied topics (§6 command).
+- [x] **S10** E2E verification: 2–3 short clips, varied topics (§6 command).
   Acceptance §6 met (sparse, in-vocab, voice always on top, seamless, cost
   tracked). Record findings + any prompt tuning in Session log.
-- [ ] **S11** §7 Definition of done re-read and fully satisfied; nothing in §8
+- [x] **S11** §7 Definition of done re-read and fully satisfied; nothing in §8
   "already merged" regressed.
 
 ### Resume notes (free-form: deviations, blockers, decisions)
 
-_None yet. (First session: replace this line with real notes as work starts.)_
+Feature is **COMPLETE** (all S0–S11 done, 20/20 tests, §6 verified). Design
+decisions a future session must NOT "fix" back:
+
+- **Cue→time resolution lives in `sound_design.py`, not `validator.py`.**
+  `validator.py:validate_sfx_cues()` is intentionally PURE (membership +
+  intensity clamp only, no I/O) so it is trivially unit-testable; anchor
+  resolution needs alignments + audio durations and sits in
+  `sound_design.py:_resolve_anchor()`. This matches §5's split exactly — not
+  a deviation.
+- **SoundDesigner OWNS `segment.sound_fx`.** `design()` clears EVERY
+  segment's `sound_fx` before attaching its picks, so legacy entries from
+  the sample-doc offline fallback can never leak past this pass (chose
+  "strip", robustly, over "ignore" — §5 allowed either).
+- **Word timings are NOT dumped into the prompt.** The model names a punch
+  word; the exact time is resolved locally from `aligns`. §4.1 lists
+  alignments as a consumed input *for placement* — placement uses them; a
+  leaner prompt is better for restraint + cost. Deliberate.
+- **`SoundFX.volume` kept (vestigial).** Gain is now driven by `intensity`;
+  `volume` stays only for back-compat with the existing validator range
+  clamp + older tests. Don't rip it out.
+- **§4.4 numbers used as-is** and verified holding on real content
+  (sfx_peak ≤ min(1.25·voiceRMS, 0.70) for every cue across 3 runs).
+- **Verification used the §6 dev-cheap path** (haiku, 3 reused real runs:
+  bedtime/discipline/illusion) rather than fresh full renders: the SFX
+  acceptance criteria are fully exercised by SoundDesigner + build_master on
+  real segments+alignments; nothing in the SFX path touches video, so a
+  full Pexels/moviepy re-render was correctly not re-done.
 
 ### Session log (append-only, newest at bottom)
 
 - 2026-05-18 — Plan instrumented with self-tracking §10. No build code written
   yet; all boxes open. Next session starts at S0.
+- 2026-05-18 — Baseline (§8 merged work + curated catalog + plan) committed on
+  branch `sound-effects-system`; 235 MB raw SFX backup gitignored.
+- 2026-05-18 — S3 model.py: `SoundFX` +`intensity`/+`reason`, parsed in
+  `_segment_from_dict` (defaults keep legacy/roundtrip safe).
+- 2026-05-18 — S4 validator.py: pure `validate_sfx_cues()` (drop off-catalog,
+  no substitution, intensity clamp, no count cap).
+- 2026-05-18 — S1+S2 sound_design.py: catalog loader, §2 purpose map, the
+  restraint prompt (persona/palette/principles/3 BAD+2 GOOD few-shots/
+  self-check/strict-JSON), LLM call (purpose `sound_design`), robust JSON
+  parse, `_resolve_anchor` (on_word+occurrence / fallback / start/end/
+  fraction). Offline/any-fail ⇒ 0 cues (silent, safe).
+- 2026-05-18 — S8 config.{yaml,example.yaml} +`sound_design` (sonnet-4-6,
+  temp 0.2); config.py override list +`sound_design`. S5 `_SEG_SYS`:
+  removed `sound_fx`, added explicit "do NOT emit sound_fx".
+- 2026-05-18 — S6 master.py: intensity→relative-gain vs local voice RMS +
+  hard clamp (≤1.25·RMS & ≤0.70) + voice-gap 0.45 fallback + ~3.5 dB
+  music-only duck; richer sfx_log (intensity/reason/voice_rms/sfx_peak) +
+  `sfx_cues`. Timeline untouched.
+- 2026-05-18 — S7 run.py: SoundDesigner wired after reflow, before
+  build_master; `[vp]` per-cue logs; cue summary into runtime/manifest.
+- 2026-05-18 — S9: tests/test_sound_design.py (7 cases incl. can't-bury-voice
+  + byte-stable empty path + end-to-end strip/resolve). Full suite 20/20,
+  no network, no regressions.
+- 2026-05-18 — S10/S11: live verify (haiku, 3 varied real runs) — bedtime=0
+  cues (restraint ✓), discipline=3, illusion=2, all in-vocab, justified,
+  seamless, voice-protected (master authoritative numbers), cost tracked
+  (~$0.003/video haiku). §7 DoD fully satisfied; §8 baseline not regressed.
+  **DONE.**

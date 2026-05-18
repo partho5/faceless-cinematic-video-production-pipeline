@@ -15,9 +15,21 @@ from typing import Any
 
 @dataclass
 class SoundFX:
+    """A resolved sound cue placed by the SoundDesigner pass.
+
+    `type` is now a CATALOG id (one of the curated 20), not a free-form name.
+    `timing` is the resolved offset **in seconds from the segment's audio
+    start** (build_master adds the segment's absolute timeline start).
+    `intensity` ∈ {soft,normal,hard} drives the can't-bury-voice gain model
+    in master.py; `volume` is kept only for back-compat / legacy docs and is
+    no longer the gain lever. `reason` is the editor's justification (logged,
+    not acted on — forces the model to earn each cue).
+    """
     type: str
     timing: float
     volume: float = 0.7
+    intensity: str = "normal"
+    reason: str = ""
 
 
 @dataclass
@@ -163,7 +175,9 @@ def _segment_from_dict(s: dict[str, Any]) -> Segment:
     s["sound_fx"] = [
         SoundFX(type=fx.get("type", "thud"),
                 timing=_num(fx.get("timing", 0.0)),
-                volume=_num(fx.get("volume", 0.7), 0.7))
+                volume=_num(fx.get("volume", 0.7), 0.7),
+                intensity=str(fx.get("intensity", "normal")),
+                reason=str(fx.get("reason", "")))
         for fx in s.get("sound_fx", [])
     ]
     s["text_animation_emphasis"] = [
