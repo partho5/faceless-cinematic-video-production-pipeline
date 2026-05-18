@@ -1,0 +1,24 @@
+# Keep line endings correct on EVERY OS checkout (the installer depends on
+# it: cmd.exe needs CRLF .bat; POSIX sh needs LF .sh).
+* text=auto
+
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+*.sh    text eol=lf
+install.py text eol=lf
+*.py    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+
+# binary assets — never touch
+*.wav   binary
+*.mp3   binary
+*.mp4   binary
+*.jpg   binary
+*.png   binary
+*.ttf   binary
+*.otf   binary
+*.cube  binary
+*.onnx  binary

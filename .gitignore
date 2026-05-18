@@ -16,6 +16,11 @@ output/
 .cache/
 assets/clips_cache/
 
+# installer-generated artifacts + userland bootstrap python
+install.log
+install_report.json
+.python/
+
 # downloaded asset bodies (specs/manifests kept, binaries ignored)
 assets/fonts/*.ttf
 assets/fonts/*.otf

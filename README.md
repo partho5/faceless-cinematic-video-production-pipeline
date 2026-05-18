@@ -121,6 +121,33 @@ Windows; only the venv-activate path and `cp`/`copy` differ. `stable-ts`
 (forced alignment) pulls in PyTorch and is heavy — it is lazy-imported, so
 the pipeline still runs (proportional alignment) if you skip it.
 
+### One-command install (recommended)
+
+A self-healing bootstrap installer audits the whole machine, then installs
+**only what's missing** (idempotent — re-running is the repair path) with
+live progress. It will even **install Python itself** if absent (Windows:
+the signed python.org installer, PATH-registered; Linux: the system package
+manager, or a no-root userland Python when there's no sudo).
+
+```bash
+# Linux / macOS
+./install.sh                 # full install (incl. precise word-alignment)
+./install.sh --check         # audit + verify only, no changes
+./install.sh --profile minimal   # skip the ~2 GB PyTorch download
+```
+```bat
+:: Windows (double-click install.bat, or:)
+install.bat
+install.bat --check
+install.bat --profile minimal
+```
+
+It writes `install.log` (full trace) and `install_report.json`
+(machine-readable, for production monitoring). Exit codes: `0` ready ·
+`1` ready with warnings · `2` fixable (re-run) · `3` PATH changed (open a
+new shell) · `4` unsupported. `--check` is the production health/drift
+gate. The manual steps below are the same thing by hand / for reference.
+
 ### Linux
 
 ```bash
