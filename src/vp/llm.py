@@ -32,6 +32,12 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
             msg = client.messages.create(**kwargs)
         else:
             raise
+
+    # plug-and-play cost tracking (best-effort; tagged by config purpose)
+    from .cost import record
+    record(spec.model, getattr(msg, "usage", None),
+           getattr(spec, "purpose", "llm"))
+
     return "".join(b.text for b in msg.content if b.type == "text")
 
 

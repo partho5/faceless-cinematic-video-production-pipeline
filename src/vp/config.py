@@ -79,16 +79,27 @@ class Config:
         env.update(_parse_env_file(env_path or (ROOT / ".env")))
         return cls(raw, env)
 
+    # purposes whose model is overridable via the VP_LLM_MODEL env var
+    # (dev cost lever: e.g. claude-haiku-4-5-20251001). Prod = config.yaml
+    # default (claude-sonnet-4-6); leave VP_LLM_MODEL unset in prod.
+    _LLM_OVERRIDE_PURPOSES = ("script_generation", "segmentation_direction")
+    _LLM_OVERRIDE_ENV = "VP_LLM_MODEL"
+
     # -- model resolution ----------------------------------------------------
     def _resolve_models(self) -> None:
         models = self._raw.get("models")
         if not models:
             raise ConfigError("config.yaml has no `models:` section")
 
+        llm_override = self._env.get(self._LLM_OVERRIDE_ENV, "").strip()
+
         for purpose, spec in models.items():
             provider = spec.get("provider") or spec.get("mode") or "local"
             key_env = spec.get("api_key_env")
             api_key = self._env.get(key_env, "").strip() if key_env else None
+            model_id = spec.get("model") or spec.get("engine") or "(local)"
+            if llm_override and purpose in self._LLM_OVERRIDE_PURPOSES:
+                model_id = llm_override
             extra = {
                 k: v
                 for k, v in spec.items()
@@ -97,7 +108,7 @@ class Config:
             self._models[purpose] = ModelSpec(
                 purpose=purpose,
                 provider=provider,
-                model=spec.get("model") or spec.get("engine") or "(local)",
+                model=model_id,
                 params=spec.get("params", {}) or {},
                 api_key_env=key_env,
                 api_key=api_key or None,
@@ -118,6 +129,33 @@ class Config:
 
     def env(self, key: str) -> str:
         return self._env.get(key, "").strip()
+
+    def _rotation_keys_present(self, m: ModelSpec) -> bool:
+        """True if a purpose has usable ROTATION keys beyond its primary env.
+
+        Mirrors voice.collect_keys (primary + comma-list + NUMBERED _1..)
+        without importing it (voice imports config). Used so the offline
+        check / warning is not fooled by an empty primary when a rotation
+        pool is configured (e.g. only GEMINI_API_KEY_1.. set).
+        """
+        rot_env = m.extra.get("api_key_rotation_env")
+        if rot_env and any(s.strip()
+                           for s in self.env(rot_env).split(",")):
+            return True
+        base = m.api_key_env or ""
+        if base:
+            for i in range(1, 25):                 # _1.._24, gap-tolerant
+                if self.env(f"{base}_{i}"):
+                    return True
+        return False
+
+    def effective_offline(self, purpose: str) -> bool:
+        """offline() but rotation-aware: a configured rotation pool keeps a
+        purpose ONLINE even when its primary api_key_env is empty."""
+        m = self.model(purpose)
+        if not m.offline:
+            return False
+        return not self._rotation_keys_present(m)
 
     # -- startup validation --------------------------------------------------
     REQUIRED_PURPOSES = (
@@ -141,9 +179,13 @@ class Config:
 
         warnings: list[str] = []
         for purpose, m in self._models.items():
-            if m.api_key_env and not m.api_key:
+            # Warn ONLY when a purpose is genuinely offline (no primary AND
+            # no rotation key). No primary-specific check: a rotation pool
+            # alone is a fully valid online setup.
+            if m.api_key_env and self.effective_offline(purpose):
                 warnings.append(
-                    f"{purpose}: env {m.api_key_env} empty -> OFFLINE stub"
+                    f"{purpose}: no usable key "
+                    f"({m.api_key_env} or rotation) -> OFFLINE stub"
                 )
         for d in (ASSETS, OUTPUT, CACHE, CLIP_CACHE):
             d.mkdir(parents=True, exist_ok=True)
@@ -152,7 +194,8 @@ class Config:
     def resolved_models_manifest(self) -> dict[str, dict[str, Any]]:
         """Per-purpose resolved model snapshot for render_manifest.json (G14)."""
         return {
-            p: {"provider": m.provider, "model": m.model, "offline": m.offline}
+            p: {"provider": m.provider, "model": m.model,
+                "offline": self.effective_offline(p)}
             for p, m in self._models.items()
         }
 

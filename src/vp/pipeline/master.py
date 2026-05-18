@@ -4,8 +4,11 @@ Builds the final mixed track on the reflowed timeline:
   voice (mastered)  +  music bed (ducked under voice)  +  SFX (JSON-timed)
 then a 2-pass ffmpeg `loudnorm` to YouTube's ~-14 LUFS (G10).
 
-Music/SFX are loaded from assets/{music,sfx} when present, else synthesized
-procedurally so the offline pipeline still gets a real designed mix.
+SFX are loaded ONLY from assets/sfx when a matching .wav exists; an absent
+or unknown effect is silence (no effect), never a procedural guess — a
+synthesized stand-in is worse than nothing (it mismatches the cue and the
+LLM invents effect names we have no real asset for). The music bed is still
+synthesized when absent: it's a continuous designed bed, not a point effect.
 """
 from __future__ import annotations
 
@@ -19,65 +22,22 @@ from ..config import ASSETS
 from ..schema.model import Segment
 
 
-# ----------------------------------------------------------- procedural SFX --
-def _env(n: int, attack: float = 0.01, decay: float = 0.3) -> np.ndarray:
-    t = np.arange(n) / SR
-    a = np.clip(t / max(1e-4, attack), 0, 1)
-    d = np.exp(-(np.clip(t - attack, 0, None)) / decay)
-    return (a * d).astype(np.float32)
+# ---------------------------------------------------------------- SFX load --
+_EMPTY = np.zeros(0, np.float32)
 
 
-def _tone(f, dur, decay=0.3):
-    n = int(dur * SR)
-    t = np.arange(n) / SR
-    return (np.sin(2 * np.pi * f * t) * _env(n, decay=decay)).astype(np.float32)
+def _load_sfx(kind: str) -> np.ndarray:
+    """Real asset audio for `kind`, or EMPTY (=> no effect) if absent.
 
-
-def _noise(dur, decay=0.2):
-    n = int(dur * SR)
-    return (np.random.default_rng(1).normal(0, 0.5, n) * _env(n, decay=decay)).astype(np.float32)
-
-
-def _mix(*arrs: np.ndarray) -> np.ndarray:
-    n = max(len(a) for a in arrs)
-    out = np.zeros(n, np.float32)
-    for a in arrs:
-        out[: len(a)] += a
-    return out
-
-
-def _synth_sfx(kind: str) -> np.ndarray:
-    k = kind.lower()
-    if "bass" in k or "thud" in k or "deep" in k:
-        return _mix(_tone(48, 0.6, 0.18), 0.5 * _tone(72, 0.5, 0.15))
-    if "whoosh" in k or "swell" in k or "rising" in k:
-        n = int(0.6 * SR); t = np.arange(n) / SR
-        return (np.random.default_rng(2).normal(0, .5, n)
-                * np.sin(np.pi * t / t[-1]) * 0.8).astype(np.float32)
-    if "heartbeat" in k:
-        b = _tone(55, 0.18, 0.08)
-        gap = np.zeros(int(0.22 * SR), np.float32)
-        return np.concatenate([b, gap, b * 0.8])
-    if "glitch" in k or "static" in k or "crackle" in k:
-        return _noise(0.3, 0.06)
-    if "tinnitus" in k or "ring" in k:
-        return _tone(3200, 0.8, 0.5) * 0.5
-    if "phone" in k or "notification" in k:
-        return _mix(_tone(880, 0.12, 0.06), _tone(1320, 0.12, 0.06))
-    if "fire" in k or "ember" in k:
-        return _noise(0.5, 0.25) * 0.4
-    if "typewriter" in k or "click" in k:
-        return _noise(0.05, 0.01)
-    return _tone(220, 0.25, 0.12)  # generic accent
-
-
-def _load_or_synth_sfx(kind: str) -> np.ndarray:
-    for ext in (".wav",):
-        p = ASSETS / "sfx" / f"{kind}{ext}"
-        if p.exists():
-            a, _ = read_wav(p)
-            return a
-    return _synth_sfx(kind)
+    No procedural synthesis: an invented/unknown effect name renders as
+    silence. A wrong synthetic sound is worse than the cue simply not
+    firing. Drop a real assets/sfx/<kind>.wav to enable an effect.
+    """
+    p = ASSETS / "sfx" / f"{kind}.wav"
+    if p.exists():
+        a, _ = read_wav(p)
+        return a
+    return _EMPTY
 
 
 def _music_bed(total_s: float) -> np.ndarray:
@@ -152,18 +112,25 @@ def build_master(
 
     mix = voice + music
 
-    # 3. SFX at JSON timings (segment-relative)
+    # 3. SFX at JSON timings (segment-relative). Absent asset => silent
+    #    no-op; recorded as rendered:false so the manifest stays honest.
     sfx_log = []
+    skipped = 0
     for s in segments:
         for fx in s.sound_fx:
-            clip = _load_or_synth_sfx(fx.type) * fx.volume
-            at = int((starts[s.id] + fx.timing) * SR)
-            end = min(len(mix), at + len(clip))
-            if at < len(mix):
-                mix[at:end] += clip[: end - at]
+            clip = _load_sfx(fx.type)
+            rendered = len(clip) > 0
+            if rendered:
+                clip = clip * fx.volume
+                at = int((starts[s.id] + fx.timing) * SR)
+                end = min(len(mix), at + len(clip))
+                if at < len(mix):
+                    mix[at:end] += clip[: end - at]
+            else:
+                skipped += 1
             sfx_log.append({"segment": s.id, "type": fx.type,
                             "at": round(starts[s.id] + fx.timing, 3),
-                            "volume": fx.volume})
+                            "volume": fx.volume, "rendered": rendered})
 
     # safety limiter
     peak = np.abs(mix).max()
@@ -193,5 +160,6 @@ def build_master(
         "duration": round(total_s, 3),
         "target_lufs": target_lufs,
         "sfx_events": sfx_log,
+        "sfx_skipped_no_asset": skipped,
         "music_track": meta.get("background_music_track", "synth_tension_drone"),
     }

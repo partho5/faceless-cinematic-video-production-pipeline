@@ -1,0 +1,182 @@
+[
+  {
+    "id": "whoosh-transition",
+    "file": "whoosh-transition.wav",
+    "category": "whoosh",
+    "description": "scene transition whoosh",
+    "duration_s": 0.624,
+    "peak_dbfs": -1.0,
+    "source_original": "Short Whoosh.mp3"
+  },
+  {
+    "id": "whoosh-fast",
+    "file": "whoosh-fast.wav",
+    "category": "whoosh",
+    "description": "quick cut swoosh",
+    "duration_s": 0.32,
+    "peak_dbfs": -1.0,
+    "source_original": "clean-fast-swooshaiff-14784.mp3"
+  },
+  {
+    "id": "impact-boom",
+    "file": "impact-boom.wav",
+    "category": "impact",
+    "description": "cinematic boom hit",
+    "duration_s": 2.5,
+    "peak_dbfs": -1.0,
+    "source_original": "mixkit-big-cinematic-impact-788.mp3"
+  },
+  {
+    "id": "sub-drop",
+    "file": "sub-drop.wav",
+    "category": "sub_drop",
+    "description": "deep bass drop",
+    "duration_s": 3.0,
+    "peak_dbfs": -1.0,
+    "source_original": "onlymp3.to - bass drop sound effect-H9CWQaMYXiI-192k-1688370057.mp3"
+  },
+  {
+    "id": "riser-buildup",
+    "file": "riser-buildup.wav",
+    "category": "riser",
+    "description": "tension build-up riser",
+    "duration_s": 1.607,
+    "peak_dbfs": -1.0,
+    "source_original": "ES_Riser Suction 5 - SFX Producer.mp3"
+  },
+  {
+    "id": "swell-cinematic",
+    "file": "swell-cinematic.wav",
+    "category": "swell",
+    "description": "cinematic brassy swell",
+    "duration_s": 3.5,
+    "peak_dbfs": -1.0,
+    "source_original": "01 Evolve_Brassy Swell.wav"
+  },
+  {
+    "id": "ui-click",
+    "file": "ui-click.wav",
+    "category": "ui",
+    "description": "crisp UI click",
+    "duration_s": 0.112,
+    "peak_dbfs": -1.0,
+    "source_original": "mixkit-hard-pop-click-2364.wav"
+  },
+  {
+    "id": "ui-pop",
+    "file": "ui-pop.wav",
+    "category": "ui",
+    "description": "bubble pop",
+    "duration_s": 0.185,
+    "peak_dbfs": -1.0,
+    "source_original": "Pop.mp3"
+  },
+  {
+    "id": "notification-ding",
+    "file": "notification-ding.wav",
+    "category": "notification",
+    "description": "notification ding",
+    "duration_s": 0.324,
+    "peak_dbfs": -1.0,
+    "source_original": "Ding.mp3"
+  },
+  {
+    "id": "glitch",
+    "file": "glitch.wav",
+    "category": "glitch",
+    "description": "digital glitch",
+    "duration_s": 1.5,
+    "peak_dbfs": -1.0,
+    "source_original": "Glitch Sound Effect.mp3"
+  },
+  {
+    "id": "typing",
+    "file": "typing.wav",
+    "category": "typing",
+    "description": "typewriter typing",
+    "duration_s": 2.5,
+    "peak_dbfs": -1.0,
+    "source_original": "Typewriter.mp3"
+  },
+  {
+    "id": "camera-shutter",
+    "file": "camera-shutter.wav",
+    "category": "camera",
+    "description": "camera shutter snap",
+    "duration_s": 0.576,
+    "peak_dbfs": -1.0,
+    "source_original": "camera-shutter-sound-effect.wav"
+  },
+  {
+    "id": "success-cash",
+    "file": "success-cash.wav",
+    "category": "success",
+    "description": "cash register ka-ching",
+    "duration_s": 0.794,
+    "peak_dbfs": -1.0,
+    "source_original": "Cash Register.mp3"
+  },
+  {
+    "id": "success-chime",
+    "file": "success-chime.wav",
+    "category": "success",
+    "description": "correct/success chime",
+    "duration_s": 0.942,
+    "peak_dbfs": -1.0,
+    "source_original": "correct sfx.mp3"
+  },
+  {
+    "id": "negative-wrong",
+    "file": "negative-wrong.wav",
+    "category": "negative",
+    "description": "wrong-answer buzzer",
+    "duration_s": 0.726,
+    "peak_dbfs": -1.0,
+    "source_original": "Wrong Answer.mp3"
+  },
+  {
+    "id": "reaction-applause",
+    "file": "reaction-applause.wav",
+    "category": "reaction",
+    "description": "crowd applause",
+    "duration_s": 3.0,
+    "peak_dbfs": -1.0,
+    "source_original": "Applause.wav"
+  },
+  {
+    "id": "sting-suspense",
+    "file": "sting-suspense.wav",
+    "category": "sting",
+    "description": "suspense glass sting",
+    "duration_s": 2.5,
+    "peak_dbfs": -1.0,
+    "source_original": "mixkit-cinematic-glass-hit-suspense-677.wav"
+  },
+  {
+    "id": "paper-flip",
+    "file": "paper-flip.wav",
+    "category": "paper",
+    "description": "paper flip",
+    "duration_s": 0.621,
+    "peak_dbfs": -1.0,
+    "source_original": "Paper Flip Sound Effect.mp3"
+  },
+  {
+    "id": "heartbeat",
+    "file": "heartbeat.wav",
+    "category": "heartbeat",
+    "description": "heartbeat thud",
+    "duration_s": 2.0,
+    "peak_dbfs": -1.0,
+    "source_original": "01 Beating.wav"
+  },
+  {
+    "id": "clock-tick",
+    "file": "clock-tick.wav",
+    "category": "clock",
+    "description": "clock ticking",
+    "duration_s": 2.0,
+    "peak_dbfs": -1.0,
+    "source_original": "Clock Ticking Sound Effect.mp3"
+  }
+]

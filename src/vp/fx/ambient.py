@@ -61,10 +61,10 @@ class KenBurns:
     (identity) when the segment already has an explicit camera move.
     """
 
-    #: base zoom floor — gives pan headroom while staying subtle
-    Z_FLOOR = 1.06
-    Z_SWING = 0.05          # extra zoom traversed across the segment
-    PAN_FRAC = 0.022        # max pan as a fraction of width/height
+    #: base zoom floor — gives pan headroom; clearly dynamic, not static
+    Z_FLOOR = 1.08
+    Z_SWING = 0.14          # continuous zoom traversed across the segment
+    PAN_FRAC = 0.060        # clear cinematic drift (frac of width/height)
 
     def __call__(self, seg, frame: np.ndarray, local_t: float, ctx) -> np.ndarray:
         if seg.camera_motion in _EXPLICIT_MOTION:

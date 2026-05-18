@@ -21,6 +21,11 @@ from ..schema.model import ControlDocument
 from ..schema.validator import validate
 
 
+def _log(msg: str) -> None:
+    # same '[vp] ' prefix as vp.run so it streams into the GUI log pane
+    print(f"[vp] {msg}", flush=True)
+
+
 def slugify(text: str) -> str:
     s = re.sub(r"[^\w\s-]", "", text.lower()).strip()
     return re.sub(r"[\s_-]+", "-", s)[:60] or "video"
@@ -54,29 +59,47 @@ class ScriptStage:
         self.cfg = cfg
         self.spec = cfg.model("script_generation")
 
-    def _anthropic(self, topic: str, target_minutes: float) -> str:
+    def _anthropic(self, topic: str, target_minutes: float,
+                   hint: str | None = None) -> str:
         from ..llm import anthropic_message  # lazy
 
+        user = f"Write the full script for: {topic}"
+        if hint and hint.strip():
+            user += (
+                "\n\nUse the following writer's hints / raw story as the "
+                "basis — honor its facts, beats and intent; rewrite it into "
+                "the channel's narration voice and chapter structure:\n"
+                f"\"\"\"\n{hint.strip()}\n\"\"\""
+            )
         return anthropic_message(
-            self.spec, system=_script_sys(target_minutes),
-            user=f"Write the full script for: {topic}",
+            self.spec, system=_script_sys(target_minutes), user=user,
         )
 
     def generate(self, topic: str, out_dir: Path,
-                 target_minutes: float = 6.0) -> Path:
+                 target_minutes: float = 6.0,
+                 hint: str | None = None) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / "script.md"
         # If the user already reviewed AND approved this exact script, keep
         # it verbatim: the script they read is the script that gets rendered,
         # and the approve->continue re-run costs zero extra API spend.
         if path.exists() and (out_dir / "script.APPROVED").exists():
+            _log("stage1: reusing approved script (0 API spend)")
             return path
         if self.spec.offline:
+            _log("stage1: offline -> sample script")
             script = (f"# {topic}\n\n" + sample_script_markdown())
         else:
+            words = int(round(max(0.5, float(target_minutes)) * _WPM))
+            _log(f"stage1: writing ~{words}-word script via "
+                 f"{self.spec.model}"
+                 f"{' (with hints)' if hint and hint.strip() else ''} "
+                 f"(one API call, ~10-30s)…")
             try:
-                script = self._anthropic(topic, target_minutes)
-            except Exception:
+                script = self._anthropic(topic, target_minutes, hint)
+            except Exception as e:
+                _log(f"stage1: LLM failed ({str(e)[:120]}); "
+                     f"falling back to sample script")
                 script = f"# {topic}\n\n" + sample_script_markdown()
         path.write_text(script, encoding="utf-8")
         return path
@@ -132,11 +155,14 @@ class SegmentStage:
     def generate(self, script_path: Path, out_dir: Path,
                  *, max_repair: int = 2) -> ControlDocument:
         if self.spec.offline:
+            _log("stage2: offline -> sample control document")
             doc = load_sample_document()
         else:
             try:
                 doc = self._generate_live(script_path)
-            except Exception:
+            except Exception as e:
+                _log(f"stage2: live segmentation failed ({e}); "
+                     f"falling back to sample document")
                 doc = load_sample_document()  # robust fallback
 
         # validate-and-repair loop (styled issues auto-repaired in-place)
@@ -151,6 +177,9 @@ class SegmentStage:
     def _generate_live(self, script_path: Path) -> ControlDocument:
         base = load_sample_document()  # reuse meta/chapters/global_assets shell
         chapters = split_chapters(script_path.read_text(encoding="utf-8"))
+        n = len(chapters)
+        _log(f"stage2: segmenting {n} chapter(s) via LLM "
+             f"(one API call each)…")
         all_segs: list[dict] = []
         for ci, (label, text) in enumerate(chapters, 1):
             repair_note = None
@@ -159,10 +188,14 @@ class SegmentStage:
                     segs = self._anthropic_chapter(label, text, repair_note)
                 except Exception as e:
                     repair_note = str(e)[:300]
+                    _log(f"stage2: chapter {ci}/{n} [{label}] "
+                         f"attempt {attempt + 1}/3 failed: {str(e)[:120]}")
                     continue
                 for si, s in enumerate(segs, 1):
                     s["id"] = f"c{ci}_seg{si}"
                 all_segs.extend(segs)
+                _log(f"stage2: chapter {ci}/{n} [{label}] -> "
+                     f"{len(segs)} segment(s)")
                 break
         d = base.to_dict()
         d["segments"] = all_segs or d["segments"]

@@ -13,9 +13,9 @@ import numpy as np
 
 # default scale envelope when JSON omits camera_scale_start/end
 _MOTION_SCALE = {
-    "slow_push_in": (1.0, 1.06), "aggressive_push_in": (1.0, 1.16),
-    "crash_zoom": (1.0, 1.22), "zoom_punch": (1.0, 1.12),
-    "slow_pull_out": (1.12, 1.0), "dolly_zoom": (1.04, 1.14),
+    "slow_push_in": (1.0, 1.13), "aggressive_push_in": (1.0, 1.24),
+    "crash_zoom": (1.0, 1.32), "zoom_punch": (1.0, 1.20),
+    "slow_pull_out": (1.20, 1.0), "dolly_zoom": (1.06, 1.22),
 }
 
 
@@ -46,12 +46,12 @@ class CameraMotion:
         tx = ty = 0.0
         ang = 0.0
         if m == "imperceptible_drift":
-            tx = 1.5 * local_t
-            scale = max(scale, 1.03)
+            tx = 4.0 * local_t
+            scale = max(scale, 1.05)
         elif m == "subtle_drift_right":
-            tx = 14 * p; scale = max(scale, 1.05)
+            tx = 34 * p; scale = max(scale, 1.07)
         elif m == "subtle_drift_left":
-            tx = -14 * p; scale = max(scale, 1.05)
+            tx = -34 * p; scale = max(scale, 1.07)
         elif m in ("light_shake", "heavy_shake", "breath_rhythm_shake",
                    "recoil_on_impact"):
             amp = {"light_shake": 3, "heavy_shake": 9,

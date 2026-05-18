@@ -74,18 +74,24 @@ class KeyPool:
         return self._clients[key]
 
     def acquire(self):
-        """Return (key_obj, client), waiting out cooldowns if every key is hot."""
-        now = time.time()
+        """Return (key_obj, client), waiting out cooldowns if every key is hot.
+
+        Blocking on a cooldown is NOT a failed attempt — the caller's retry
+        budget must only count genuine API failures, never time spent here
+        (see _synth). Loop, don't recurse, so a long 429 storm can't blow
+        the stack.
+        """
         n = len(self._keys)
-        for i in range(n):
-            k = self._keys[(self._rr + i) % n]
-            if k.cool_until <= now:
-                self._rr = (self._rr + i + 1) % n
-                return k, self._client(k.value)
-        # all cooling -> sleep until the soonest one frees
-        soonest = min(k.cool_until for k in self._keys)
-        time.sleep(max(1.0, soonest - now))
-        return self.acquire()
+        while True:
+            now = time.time()
+            for i in range(n):
+                k = self._keys[(self._rr + i) % n]
+                if k.cool_until <= now:
+                    self._rr = (self._rr + i + 1) % n
+                    return k, self._client(k.value)
+            # all cooling -> sleep until the soonest one frees, then re-scan
+            soonest = min(k.cool_until for k in self._keys)
+            time.sleep(max(1.0, soonest - now))
 
     @staticmethod
     def park(key: _Key, err: str) -> None:
@@ -201,7 +207,13 @@ class VoiceStage:
         )
         prompt = _prompt(self.spec, self.scene, self.context, text)
         last = None
-        for _ in range(pool.size * 2):
+        # Budget counts GENUINE failed API calls only. acquire() may block on
+        # cooldowns without consuming this, so a transient 429 storm waits
+        # (keys free in seconds) instead of prematurely raising; the cap is
+        # still finite so a permanent daily-quota exhaustion can't hang.
+        max_failures = max(8, pool.size * 3)
+        failures = 0
+        while failures < max_failures:
             key, client = pool.acquire()
             try:
                 r = client.models.generate_content(
@@ -212,9 +224,11 @@ class VoiceStage:
                 last = e
                 if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                     KeyPool.park(key, str(e))
+                    failures += 1
                     continue
                 raise
-        raise RuntimeError(f"all keys exhausted: {last}")
+        raise RuntimeError(
+            f"all keys exhausted after {failures} rate-limited attempts: {last}")
 
     def synthesize(self, doc: ControlDocument, audio_dir: Path) -> VoiceResult:
         audio_dir.mkdir(parents=True, exist_ok=True)

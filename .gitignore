@@ -25,6 +25,8 @@ assets/music/*.mp3
 assets/sfx/*.wav
 assets/sfx/*.mp3
 assets/tts_voices/*.onnx
+# raw 225-file SFX source backup (235 MB; local-only — curated 20 live in assets/sfx/)
+assets/SFX-Sound-Effects/
 
 # moviepy render temp artifacts
 *TEMP_MPY_*.mp4

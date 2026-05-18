@@ -98,9 +98,15 @@ class FilmFX:
 
     def __call__(self, seg, frame: np.ndarray, local_t: float, ctx) -> np.ndarray:
         meta = ctx.doc.video_meta
-        grain = seg.grain_override if seg.grain_override is not None else meta.get("base_grain", 0.2)
-        vig = seg.vignette_override if seg.vignette_override is not None else meta.get("base_vignette", 0.35)
+        # Clean image is the DEFAULT. Grain/vignette/CA are opt-in polish, not
+        # a baked-in "old TV" look, and the AI's per-segment overrides are
+        # hard-capped so it can never crank these into a low-effort mess.
+        grain = seg.grain_override if seg.grain_override is not None else meta.get("base_grain", 0.0)
+        vig = seg.vignette_override if seg.vignette_override is not None else meta.get("base_vignette", 0.18)
         ca = seg.chromatic_aberration or meta.get("base_chromatic_aberration", 0.0)
+        grain = min(max(0.0, float(grain)), 0.05)   # barely-there filmic, never snow
+        vig = min(max(0.0, float(vig)), 0.28)       # gentle premium framing only
+        ca = min(max(0.0, float(ca)), 0.03)         # subtle, never rainbow fringing
         h, w = frame.shape[:2]
         f = frame.astype(np.float32)
 

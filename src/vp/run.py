@@ -35,7 +35,7 @@ def _log(msg: str) -> None:
 def run(topic: str, *, preset: str = "preview", approve: bool = False,
         segments: int | None = None, do_upload: bool = True,
         tts_scene: str | None = None, tts_context: str | None = None,
-        target_minutes: float = 6.0) -> dict:
+        target_minutes: float = 6.0, hint: str | None = None) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -45,14 +45,21 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     (out / "audio").mkdir(parents=True, exist_ok=True)
     _log(f"output dir: {out}")
 
+    from .cost import TRACKER as COST
+    COST.start(title=topic, slug=slug, path=str(out / "final.mp4"))
+
     # 1. Stage 1 + review gate
     script_path = ScriptStage(cfg).generate(topic, out,
-                                             target_minutes=target_minutes)
+                                             target_minutes=target_minutes,
+                                             hint=hint)
     _log(f"stage1 script -> {script_path.name} (~{target_minutes:g} min target)")
     if not review_gate(script_path, auto_approve=approve):
         _log("review gate: NOT approved. Read the script, then approve to "
              "continue (the GUI shows an Approve button; CLI: create the "
              "file 'script.APPROVED' next to script.md, or pass --approve).")
+        cs = COST.save(out, ledger=OUTPUT / "llm_cost_ledger.jsonl")
+        _log(f"llm cost (so far): ${cs['total_cost_usd']:.4f} "
+             f"-> llm_cost.json")
         _log(f"REVIEW_REQUIRED {script_path}")
         return {"status": "awaiting_review", "script": str(script_path)}
 
@@ -150,8 +157,12 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
                    master_info=master, clip_provenance=cp.manifest,
                    qa=qa, upload=up, script_topic=topic, runtime=runtime)
     _log(f"manifest -> render_manifest.json")
+    cs = COST.save(out, ledger=OUTPUT / "llm_cost_ledger.jsonl")
+    _log(f"llm cost: ${cs['total_cost_usd']:.4f} ({cs['llm_calls']} calls) "
+         f"-> llm_cost.json | {cs['context']}")
     _log(f"DONE — deliverable at {out}/final.mp4")
-    return {"status": "ok", "output": str(out), "qa": qa["passed"]}
+    return {"status": "ok", "output": str(out), "qa": qa["passed"],
+            "llm_cost_usd": cs["total_cost_usd"]}
 
 
 def main(argv=None) -> int:
@@ -169,11 +180,14 @@ def main(argv=None) -> int:
                     help="override TTS context framing (per-niche steering)")
     ap.add_argument("--minutes", type=float, default=6.0,
                     help="approx target video length in minutes (~150 wpm)")
+    ap.add_argument("--hint", default=None,
+                    help="optional script hints or a raw story to base the "
+                         "narration on (free text)")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
             tts_scene=a.tts_scene, tts_context=a.tts_context,
-            target_minutes=a.minutes)
+            target_minutes=a.minutes, hint=a.hint)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 
