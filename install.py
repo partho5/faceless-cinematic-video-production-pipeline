@@ -31,6 +31,7 @@ import ssl
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -114,7 +115,8 @@ def run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None,
     if p.stdout:
         log(p.stdout.rstrip(), "OUT")
     if p.stderr:
-        log(p.stderr.rstrip(), "ERR")
+        level = "ERROR" if p.returncode != 0 else "ERR"
+        log(p.stderr.rstrip(), level)
     if check and p.returncode != 0:
         raise RuntimeError(f"command failed ({p.returncode}): {cmd}")
     return p.returncode, p.stdout or "", p.stderr or ""
@@ -829,48 +831,61 @@ def main(argv=None) -> int:
             f"provided one.{Con.X}")
         return EXIT_FATAL
 
-    r = audit(args)
+    try:
+        r = audit(args)
 
-    if args.check or args.offline:
+        if args.check or args.offline:
+            ok, notes = verify(args)
+            r.dump({"mode": "check", "verify_ok": ok, "notes": notes})
+            worst = r.worst()
+            say("")
+            say(f"{Con.BOLD}Readiness: {worst}{Con.X}  "
+                f"(report → {REPORT_PATH.name})")
+            rc = EXIT_OK if worst == "READY" and ok else (
+                EXIT_WARN if worst == "WARN" else EXIT_FIXABLE)
+            log(f"install.py exit {rc}", "INFO")
+            return rc
+
+        code = execute(r, args)
+        if code in (EXIT_FIXABLE, EXIT_FATAL):
+            r.dump({"mode": "install", "result": "failed", "exit": code})
+            say(f"\n{Con.R}Install incomplete (exit {code}). "
+                f"Fix the above and re-run — it resumes.{Con.X}")
+            log(f"install.py exit {code}", "INFO")
+            return code
+
         ok, notes = verify(args)
-        r.dump({"mode": "check", "verify_ok": ok, "notes": notes})
-        worst = r.worst()
+        r2 = audit(args)
+        worst = r2.worst()
+        r2.dump({"mode": "install", "verify_ok": ok, "notes": notes,
+                 "exit": code})
+
         say("")
-        say(f"{Con.BOLD}Readiness: {worst}{Con.X}  "
-            f"(report → {REPORT_PATH.name})")
-        return EXIT_OK if worst == "READY" and ok else (
-            EXIT_WARN if worst == "WARN" else EXIT_FIXABLE)
+        if worst == "READY" and ok and code == EXIT_OK:
+            say(f"{Con.G}{Con.BOLD}{Con.OK} Ready.{Con.X}  Run the app:")
+        else:
+            for nte in notes:
+                say(f"  {Con.WARN} {nte}")
+            say(f"{Con.Y}Completed with warnings - usable. "
+                f"Run the app:{Con.X}")
+        say(f"    {Con.BOLD}{venv_python()} run.py{Con.X}   (GUI)")
+        say(f"    or: {venv_python()} -m vp.run \"<topic>\" --approve")
+        rc = EXIT_OK if (worst == "READY" and ok and code == EXIT_OK) \
+            else EXIT_WARN
+        log(f"install.py exit {rc}", "INFO")
+        return rc
 
-    code = execute(r, args)
-    if code in (EXIT_FIXABLE, EXIT_FATAL):
-        r.dump({"mode": "install", "result": "failed", "exit": code})
-        say(f"\n{Con.R}Install incomplete (exit {code}). "
-            f"Fix the above and re-run — it resumes.{Con.X}")
-        return code
-
-    ok, notes = verify(args)
-    r2 = audit(args)
-    worst = r2.worst()
-    r2.dump({"mode": "install", "verify_ok": ok, "notes": notes,
-             "exit": code})
-
-    say("")
-    if worst == "READY" and ok and code == EXIT_OK:
-        say(f"{Con.G}{Con.BOLD}{Con.OK} Ready.{Con.X}  Run the app:")
-    else:
-        for nte in notes:
-            say(f"  {Con.WARN} {nte}")
-        say(f"{Con.Y}Completed with warnings - usable. "
-            f"Run the app:{Con.X}")
-    say(f"    {Con.BOLD}{venv_python()} run.py{Con.X}   (GUI)")
-    say(f"    or: {venv_python()} -m vp.run \"<topic>\" --approve")
-    return EXIT_OK if (worst == "READY" and ok and code == EXIT_OK) \
-        else EXIT_WARN
+    except Exception:
+        tb = traceback.format_exc()
+        log(f"Unexpected error in install.py:\n{tb}", "ERROR")
+        say(f"\n{Con.R}Unexpected error — see {LOG_PATH.name} for details.{Con.X}")
+        return EXIT_FATAL
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
+        log("install.py interrupted by user", "WARN")
         say("\nInterrupted.")
         raise SystemExit(130)

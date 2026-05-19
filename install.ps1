@@ -16,11 +16,18 @@ $ErrorActionPreference = 'Stop'
 $Root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $MinPy  = [Version]'3.10'
 $PyVer  = '3.12.5'                       # pinned python.org fallback version
+$LogFile = Join-Path $Root 'install.log'
+
+function Write-Log($level, $msg) {
+  $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+  $line = "$ts [$level] [ps1] $msg`n"
+  [System.IO.File]::AppendAllText($LogFile, $line, [System.Text.Encoding]::UTF8)
+}
 
 function Info($m){ Write-Host $m }
 function Ok  ($m){ Write-Host $m -ForegroundColor Green }
-function Warn($m){ Write-Host $m -ForegroundColor Yellow }
-function Err ($m){ Write-Host $m -ForegroundColor Red }
+function Warn($m){ Write-Host $m -ForegroundColor Yellow; Write-Log 'WARN'  $m }
+function Err ($m){ Write-Host $m -ForegroundColor Red;    Write-Log 'ERROR' $m }
 
 # True if $exe runs and is >= 3.10
 function Test-Py($exe) {
@@ -104,6 +111,7 @@ function Install-Python {
 }
 
 # --- orchestrate ---------------------------------------------------------
+Write-Log 'INFO' "install.ps1 start (ps_ver=$($PSVersionTable.PSVersion))"
 Info "Video Production - bootstrap (Windows)"
 $py = Find-Py
 if (-not $py) {
@@ -135,16 +143,21 @@ if ($installExit -le 1) {
       & $venvPythonw -c "from PIL import Image; Image.open(r'$pngPath').save(r'$icoPath')" 2>$null
     }
     if ((Test-Path $icoPath) -and -not (Test-Path $lnkPath)) {
-      $ws = New-Object -ComObject WScript.Shell
-      $sc = $ws.CreateShortcut($lnkPath)
-      $sc.TargetPath      = $venvPythonw
-      $sc.Arguments       = "`"$Root\run.py`""
-      $sc.IconLocation    = $icoPath
-      $sc.WorkingDirectory = $Root
-      $sc.Save()
-      Ok "Launcher created: Video Production Studio.lnk"
+      try {
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut($lnkPath)
+        $sc.TargetPath      = $venvPythonw
+        $sc.Arguments       = "`"$Root\run.py`""
+        $sc.IconLocation    = $icoPath
+        $sc.WorkingDirectory = $Root
+        $sc.Save()
+        Ok "Launcher created: Video Production Studio.lnk"
+      } catch {
+        Warn "Could not create shortcut: $($_.Exception.Message)"
+      }
     }
   }
 }
 
+Write-Log 'INFO' "install.ps1 exit $installExit"
 exit $installExit

@@ -16,18 +16,39 @@ may need the system package `python3-tk`.
 """
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import re
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 ENV_FILE = ROOT / ".env"
 SAMPLE_SEGMENTS = "6"  # "short sample" cap
+_LOG_FILE = ROOT / "run.log"
+
+_logger: logging.Logger | None = None
+
+
+def _setup_logging() -> None:
+    global _logger
+    if _logger is not None:
+        return
+    handler = logging.FileHandler(str(_LOG_FILE), encoding="utf-8")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"))
+    logger = logging.getLogger("vp.launcher")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.propagate = False
+    _logger = logger
+    _logger.info("run.py started (pid=%d)", os.getpid())
 
 
 def _ensure_venv_python() -> None:
@@ -58,6 +79,7 @@ def _ensure_venv_python() -> None:
 
 
 _ensure_venv_python()
+_setup_logging()
 
 
 try:
@@ -702,6 +724,8 @@ class App:
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         try:
+            if _logger:
+                _logger.info("launching: %s", " ".join(argv))
             self.proc = subprocess.Popen(
                 argv, cwd=str(ROOT), env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -711,8 +735,14 @@ class App:
             for line in self.proc.stdout:
                 self.q.put(line)
             self.proc.wait()
+            rc = self.proc.returncode
+            if rc not in (0, None) and _logger:
+                _logger.error("pipeline exited with code %d | cmd: %s",
+                              rc, " ".join(argv))
         except Exception as e:  # pragma: no cover
             self.q.put(f"\n[launcher error] {e}\n")
+            if _logger:
+                _logger.error("worker exception:\n%s", traceback.format_exc())
         finally:
             self.master.after(0, self._finished)
 
@@ -760,11 +790,17 @@ def _set_window_icon(root: tk.Tk) -> None:
 
 
 def main() -> int:
-    root = tk.Tk()
-    _set_window_icon(root)
-    App(root)
-    root.mainloop()
-    return 0
+    try:
+        root = tk.Tk()
+        _set_window_icon(root)
+        App(root)
+        root.mainloop()
+        return 0
+    except Exception:
+        tb = traceback.format_exc()
+        if _logger:
+            _logger.error("unhandled exception in main:\n%s", tb)
+        raise
 
 
 if __name__ == "__main__":
