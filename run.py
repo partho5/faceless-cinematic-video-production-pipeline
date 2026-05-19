@@ -16,6 +16,7 @@ may need the system package `python3-tk`.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import queue
@@ -29,6 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 ENV_FILE = ROOT / ".env"
+RESUME_FILE = ROOT / ".resume_state.json"
 SAMPLE_SEGMENTS = "6"  # "short sample" cap
 _LOG_FILE = ROOT / "run.log"
 
@@ -158,6 +160,27 @@ def _detect_keys() -> dict[str, bool]:
     }
 
 
+def _save_resume_state(state: dict) -> None:
+    try:
+        RESUME_FILE.write_text(json.dumps(state, ensure_ascii=False),
+                               encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_resume_state() -> dict | None:
+    if not RESUME_FILE.exists():
+        return None
+    try:
+        return json.loads(RESUME_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _clear_resume_state() -> None:
+    RESUME_FILE.unlink(missing_ok=True)
+
+
 class App:
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
@@ -167,6 +190,7 @@ class App:
         self.out_dir: Path | None = None
         self.review_script: Path | None = None
         self.review_pending = False
+        self._resuming = False
         self._pct = 0          # logical target %
         self._disp = 0         # currently displayed % (animated toward target)
         self._anim_job = None
@@ -192,7 +216,37 @@ class App:
         self._build_progress(body)
         self._build_log(body)
 
+        self.master.after(100, self._check_resume)
         self.master.after(120, self._drain)
+
+    # -- resume ------------------------------------------------------------
+    def _check_resume(self) -> None:
+        state = _load_resume_state()
+        if not state:
+            return
+        topic = state.get("topic", "")
+        if not messagebox.askyesno(
+            "Unfinished task",
+            f"Unfinished task found:\n\n\"{topic}\"\n\nFinish it first?",
+            default="yes",
+        ):
+            _clear_resume_state()
+            return
+        self.topic.delete(0, "end")
+        self.topic.insert(0, topic)
+        self.preset.set(state.get("preset", "final"))
+        self.minutes.delete(0, "end")
+        self.minutes.insert(0, state.get("minutes", "6"))
+        hint = state.get("hint", "")
+        self.hint.delete("1.0", "end")
+        if hint:
+            self.hint.insert("1.0", hint)
+        self.upload.set(state.get("upload", False))
+        self.review.set(state.get("review", False))
+        self.sample.set(state.get("sample", False))
+        self._resuming = True
+        self.on_run()
+        self._resuming = False
 
     # -- scrollable shell --------------------------------------------------
     def _scrollable(self, master) -> ttk.Frame:
@@ -652,6 +706,8 @@ class App:
             argv.append("--no-upload")
         if self.sample.get():
             argv += ["--segments", SAMPLE_SEGMENTS]
+        if self._resuming:
+            argv.append("--resume")
         return argv
 
     # -- run ---------------------------------------------------------------
@@ -705,6 +761,15 @@ class App:
         self._launch(self.last_argv)
 
     def _launch(self, argv: list[str]) -> None:
+        _save_resume_state({
+            "topic": self.topic.get().strip(),
+            "preset": self.preset.get(),
+            "minutes": self.minutes.get().strip(),
+            "hint": self.hint.get("1.0", "end").strip(),
+            "upload": self.upload.get(),
+            "review": self.review.get(),
+            "sample": self.sample.get(),
+        })
         self.run_btn.configure(state="disabled", text="Running…")
         shown = list(argv)
         if "--hint" in shown:                       # keep echo readable
@@ -765,6 +830,7 @@ class App:
             self._cancel("_creep_job")
             done = self._pct >= 100
             if done:
+                _clear_resume_state()
                 self._set_pct(100, "Finished")
                 final = (f"{self.out_dir}/final.mp4"
                          if self.out_dir else "output/<slug>/final.mp4")

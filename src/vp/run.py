@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -55,6 +56,7 @@ from .pipeline.pexels import ClipProvider
 from .pipeline.qa import run_qa, write_manifest
 from .pipeline.render import RenderEngine
 from .pipeline.script_gen import ScriptStage, SegmentStage, review_gate, slugify
+from .schema.model import ControlDocument
 from .pipeline.timeline import reflow
 from .pipeline.youtube import upload as yt_upload
 from .schema.validator import validate
@@ -67,7 +69,8 @@ def _log(msg: str) -> None:
 def run(topic: str, *, preset: str = "preview", approve: bool = False,
         segments: int | None = None, do_upload: bool = True,
         tts_scene: str | None = None, tts_context: str | None = None,
-        target_minutes: float = 6.0, hint: str | None = None) -> dict:
+        target_minutes: float = 6.0, hint: str | None = None,
+        resume: bool = False) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -81,10 +84,16 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     COST.start(title=topic, slug=slug, path=str(out / "final.mp4"))
 
     # 1. Stage 1 + review gate
-    script_path = ScriptStage(cfg).generate(topic, out,
-                                             target_minutes=target_minutes,
-                                             hint=hint)
-    _log(f"stage1 script -> {script_path.name} (~{target_minutes:g} min target)")
+    _script_path = out / "script.md"
+    if resume and _script_path.exists():
+        script_path = _script_path
+        _log(f"resume: stage1 skipped (script.md exists)")
+        _log(f"stage1 script -> {script_path.name} (~{target_minutes:g} min target)")
+    else:
+        script_path = ScriptStage(cfg).generate(topic, out,
+                                                 target_minutes=target_minutes,
+                                                 hint=hint)
+        _log(f"stage1 script -> {script_path.name} (~{target_minutes:g} min target)")
     if not review_gate(script_path, auto_approve=approve):
         _log("review gate: NOT approved. Read the script, then approve to "
              "continue (the GUI shows an Approve button; CLI: create the "
@@ -96,7 +105,17 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         return {"status": "awaiting_review", "script": str(script_path)}
 
     # 2. Stage 2 -> validated control doc
-    doc = SegmentStage(cfg).generate(script_path, out)
+    doc: ControlDocument | None = None
+    _video_json = out / "video.json"
+    if resume and _video_json.exists():
+        try:
+            doc = ControlDocument.from_dict(
+                json.loads(_video_json.read_text(encoding="utf-8")))
+            _log(f"resume: stage2 skipped (video.json exists)")
+        except Exception:
+            doc = None
+    if doc is None:
+        doc = SegmentStage(cfg).generate(script_path, out)
     if segments:
         doc.segments = doc.segments[:segments]
     res = validate(doc)
@@ -232,11 +251,14 @@ def main(argv=None) -> int:
     ap.add_argument("--hint", default=None,
                     help="optional script hints or a raw story to base the "
                          "narration on (free text)")
+    ap.add_argument("--resume", action="store_true",
+                    help="reuse existing script.md / video.json artifacts "
+                         "to skip completed API stages")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
             tts_scene=a.tts_scene, tts_context=a.tts_context,
-            target_minutes=a.minutes, hint=a.hint)
+            target_minutes=a.minutes, hint=a.hint, resume=a.resume)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

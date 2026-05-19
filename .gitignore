@@ -22,6 +22,7 @@ install_report.json
 
 # runtime log + generated shortcuts / icon
 run.log
+.resume_state.json
 *.lnk
 assets/icon.ico
 

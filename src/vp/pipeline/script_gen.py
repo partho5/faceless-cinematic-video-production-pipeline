@@ -161,7 +161,7 @@ class SegmentStage:
             doc = load_sample_document()
         else:
             try:
-                doc = self._generate_live(script_path)
+                doc = self._generate_live(script_path, out_dir)
             except Exception as e:
                 _log(f"stage2: live segmentation failed ({e}); "
                      f"falling back to sample document")
@@ -176,14 +176,25 @@ class SegmentStage:
                                             encoding="utf-8")
         return doc
 
-    def _generate_live(self, script_path: Path) -> ControlDocument:
+    def _generate_live(self, script_path: Path, out_dir: Path) -> ControlDocument:
         base = load_sample_document()  # reuse meta/chapters/global_assets shell
         chapters = split_chapters(script_path.read_text(encoding="utf-8"))
         n = len(chapters)
         _log(f"stage2: segmenting {n} chapter(s) via LLM "
              f"(one API call each)…")
+        ch_cache = out_dir / "_seg_chapters"
+        ch_cache.mkdir(parents=True, exist_ok=True)
         all_segs: list[dict] = []
         for ci, (label, text) in enumerate(chapters, 1):
+            cache_file = ch_cache / f"{ci}.json"
+            if cache_file.exists():
+                try:
+                    segs = json.loads(cache_file.read_text(encoding="utf-8"))
+                    _log(f"stage2: chapter {ci}/{n} [{label}] (cached, skipping API call)")
+                    all_segs.extend(segs)
+                    continue
+                except Exception:
+                    pass
             repair_note = None
             for attempt in range(3):  # G3 per-chapter retry
                 try:
@@ -195,6 +206,7 @@ class SegmentStage:
                     continue
                 for si, s in enumerate(segs, 1):
                     s["id"] = f"c{ci}_seg{si}"
+                cache_file.write_text(json.dumps(segs), encoding="utf-8")
                 all_segs.extend(segs)
                 _log(f"stage2: chapter {ci}/{n} [{label}] -> "
                      f"{len(segs)} segment(s)")
