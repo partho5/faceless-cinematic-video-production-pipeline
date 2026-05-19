@@ -20,7 +20,25 @@ if not defined PS_EXE (
   echo         %%SystemRoot%%\System32\WindowsPowerShell\v1.0\powershell.exe
   echo         and is not on PATH. It ships with every Windows 7+ install;
   echo         on a stripped image, install PowerShell and re-run.
+  echo.
+  echo Please contact the developer for assistance.
+  echo.
+  echo Press Enter to close this window...
+  set /p "_dummy="
   exit /b 4
 )
 "%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
-exit /b %ERRORLEVEL%
+set "_EC=%ERRORLEVEL%"
+
+echo.
+if %_EC% gtr 1 (
+  "%PS_EXE%" -NoProfile -Command "Write-Host '  [FAILED] Installation did not complete (exit %_EC%). Please send install.log to the developer.' -ForegroundColor Red"
+) else if %_EC% equ 1 (
+  "%PS_EXE%" -NoProfile -Command "Write-Host '  [OK] Installed with warnings. See install.log for details.' -ForegroundColor Yellow"
+) else (
+  "%PS_EXE%" -NoProfile -Command "Write-Host '  [OK] Installation complete. Ready to run.' -ForegroundColor Green"
+)
+echo.
+echo Press Enter to close this window...
+set /p "_dummy="
+exit /b %_EC%
