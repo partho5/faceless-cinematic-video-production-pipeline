@@ -359,6 +359,12 @@ class App:
         st.map("Ghost.TButton",
                background=[("active", T.BORDER), ("disabled", T.BG)],
                foreground=[("disabled", T.MUTED)])
+        st.configure("Danger.TButton", background="#C0392B",
+                     foreground="#FFFFFF", borderwidth=0,
+                     focuscolor="#C0392B", padding=(14, 8))
+        st.map("Danger.TButton",
+               background=[("active", "#E74C3C"), ("disabled", T.BORDER)],
+               foreground=[("disabled", T.MUTED)])
 
         st.configure("Bar.Horizontal.TProgressbar", background=T.ACCENT,
                      troughcolor=T.INPUT, bordercolor=T.BORDER,
@@ -449,6 +455,7 @@ class App:
     def _build_actions(self, p) -> None:
         bar = ttk.Frame(p, style="App.TFrame")
         bar.pack(fill="x")
+        self._action_bar = bar
         self.run_btn = ttk.Button(bar, text="Create Video",
                                   style="Accent.TButton", command=self.on_run)
         self.run_btn.pack(side="left")
@@ -457,8 +464,12 @@ class App:
                                       command=self.on_approve,
                                       state="disabled")
         self.approve_btn.pack(side="left", padx=10)
-        ttk.Button(bar, text="Quit", style="Ghost.TButton",
+        ttk.Button(bar, text="Quit", style="Danger.TButton",
                    command=self.master.destroy).pack(side="right")
+        self.open_btn = ttk.Button(bar, text="Open Output Folder",
+                                   style="Ghost.TButton",
+                                   command=self.on_open_folder)
+        # packed dynamically when a render completes successfully
 
     def _build_status(self, p) -> None:
         row = ttk.Frame(p, style="App.TFrame")
@@ -640,8 +651,20 @@ class App:
         self.pct_lbl.configure(text="0%", foreground=T.FG)
         self.stage_lbl.configure(text="starting…")
         self.approve_btn.configure(state="disabled")
+        self.open_btn.pack_forget()
         self.last_argv = argv
         self._launch(argv)
+
+    def on_open_folder(self) -> None:
+        if not self.out_dir or not self.out_dir.exists():
+            messagebox.showwarning("Not found", "Output folder not found.")
+            return
+        if os.name == "nt":
+            os.startfile(str(self.out_dir))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(self.out_dir)])
+        else:
+            subprocess.Popen(["xdg-open", str(self.out_dir)])
 
     def on_approve(self) -> None:
         if not (self.out_dir and self.review_script):
@@ -713,11 +736,13 @@ class App:
             done = self._pct >= 100
             if done:
                 self._set_pct(100, "Finished")
+                final = (f"{self.out_dir}/final.mp4"
+                         if self.out_dir else "output/<slug>/final.mp4")
+                self._append(f"\n✅ Finished — see {final}\n")
+                self.open_btn.pack(side="right", padx=(0, 10))
             else:
                 self.stage_lbl.configure(text="Stopped")
-            self._append(
-                "\n✅ Finished — see output/<slug>/final.mp4\n" if done
-                else "\n■ Process ended.\n")
+                self._append("\n■ Process ended.\n")
 
 
 def main() -> int:
