@@ -151,6 +151,33 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         _log("FATAL: control doc failed validation:\n" + str(res))
         return {"status": "invalid_document"}
 
+    # 2b. music design — macro-editorial pass: one LLM call picks a track from
+    #     the closed catalog based on niche/tone. Runs before TTS so a failure
+    #     is learned before burning voice API credits. Checkpointed to
+    #     music.json so --resume skips the API call on re-runs.
+    from .pipeline.music_design import MusicDesigner
+
+    _music_json = out / "music.json"
+    md: dict | None = None
+    if resume and _music_json.exists():
+        try:
+            cached = json.loads(_music_json.read_text(encoding="utf-8"))
+            doc.video_meta.update(cached["meta_patch"])
+            md = cached
+            _log(f"resume: music_design skipped "
+                 f"(track={cached.get('track') or 'none'})")
+        except Exception:
+            md = None
+    if md is None:
+        md = MusicDesigner(cfg).design(doc)
+        _music_json.write_text(
+            json.dumps(md, ensure_ascii=False, indent=2), encoding="utf-8")
+        doc.video_meta.update(md["meta_patch"])
+    _log(f"music: {md.get('track') or 'none'} "
+         f"[{md.get('presence', '?')}] "
+         f"(model={md.get('model')}"
+         f"{', offline' if md.get('offline') else ''})")
+
     # 3. VOICE (continuous per-chapter read, sliced per segment) -> align
     from .pipeline.voice import VoiceStage
 
@@ -248,6 +275,13 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
             "n_cues": sd["n_cues"], "n_dropped": sd["n_dropped"],
             "offline": sd["offline"], "model": sd["model"],
             "cues": sd["cues"],
+        },
+        "music_design": {
+            "track":    md.get("track"),
+            "presence": md.get("presence"),
+            "reason":   md.get("reason"),
+            "offline":  md.get("offline"),
+            "model":    md.get("model"),
         },
         # true if ANY stage fell back to a stub (drives the cost note, G14)
         "any_stub": vr.offline

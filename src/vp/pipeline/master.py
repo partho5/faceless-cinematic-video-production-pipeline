@@ -7,8 +7,13 @@ then a 2-pass ffmpeg `loudnorm` to YouTube's ~-14 LUFS (G10).
 SFX are loaded ONLY from assets/sfx when a matching .wav exists; an absent
 or unknown effect is silence (no effect), never a procedural guess — a
 synthesized stand-in is worse than nothing (it mismatches the cue and the
-LLM invents effect names we have no real asset for). The music bed is still
-synthesized when absent: it's a continuous designed bed, not a point effect.
+LLM invents effect names we have no real asset for).
+
+Music bed: loaded from assets/music/<slug>.mp3 as selected by MusicDesigner.
+No music (slug=None or file absent) -> silence, never a synth fallback.
+The hook protection rule: music is completely silent for the duration of the
+first segment (clamped 3–6 s), then fades in over music_fade_in_s. This
+preserves the opening hook — the soul of the video — from any competition.
 
 Each cue is gain-staged by `intensity` RELATIVE to the local narration RMS
 and hard-clamped so a sound can never bury the voice (safety #2 of plan
@@ -58,17 +63,131 @@ def _load_sfx(kind: str) -> np.ndarray:
     return _EMPTY
 
 
-def _music_bed(total_s: float) -> np.ndarray:
-    p = ASSETS / "music" / "tension_drone.wav"
-    if p.exists():
-        a, _ = read_wav(p)
-        return np.tile(a, int(np.ceil(total_s * SR / len(a))))[: int(total_s * SR)]
-    n = int(total_s * SR)
-    t = np.arange(n) / SR
-    drone = (0.5 * np.sin(2 * np.pi * 55 * t)
-             + 0.3 * np.sin(2 * np.pi * 82.4 * t)
-             + 0.2 * np.sin(2 * np.pi * 110 * t * (1 + 0.002 * np.sin(0.3 * t))))
-    return (drone * 0.25).astype(np.float32)
+# Hook-silence bounds: music is mute for at least this many seconds at the
+# start (preserving the hook) and at most this many (so short segments don't
+# push music too far in). Applied in _music_bed; both values are code policy.
+_MUSIC_HOOK_MIN_S  = 3.0
+_MUSIC_HOOK_MAX_S  = 6.0
+_MUSIC_LOOP_XFADE_S = 3.0  # crossfade window at each loop boundary
+
+
+def _decode_mp3(path: Path) -> np.ndarray:
+    """Decode an MP3 to mono float32 at the pipeline sample rate via ffmpeg."""
+    result = subprocess.run(
+        ["ffmpeg", "-i", str(path),
+         "-f", "f32le", "-ar", str(SR), "-ac", "1", "-"],
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        return _EMPTY
+    return np.frombuffer(result.stdout, dtype=np.float32)
+
+
+def _tile_with_crossfade(raw: np.ndarray, n_total: int, xfade_n: int) -> np.ndarray:
+    """Tile `raw` to fill `n_total` samples, crossfading at each loop boundary.
+
+    Each copy overlaps the previous by `xfade_n` samples. The tail of the
+    outgoing copy fades to 0 while the head of the incoming copy fades from 0,
+    and they are summed — hiding the seam completely for ambient/looping music.
+    Falls back to hard tile when the track already covers the full duration
+    (no loop needed) or is too short to crossfade sensibly.
+    """
+    track_len = len(raw)
+    if track_len == 0:
+        return np.zeros(n_total, np.float32)
+    # no loop needed — just truncate
+    if n_total <= track_len:
+        return raw[:n_total].copy()
+    # guard: track shorter than 2× crossfade window (shouldn't happen)
+    if track_len <= xfade_n * 2:
+        repeats = int(np.ceil(n_total / track_len))
+        return np.tile(raw, repeats)[:n_total].copy()
+
+    step     = track_len - xfade_n
+    fade_out = np.linspace(1.0, 0.0, xfade_n, dtype=np.float32)
+    fade_in  = np.linspace(0.0, 1.0, xfade_n, dtype=np.float32)
+
+    out = np.zeros(n_total, np.float32)
+    pos, copy_idx = 0, 0
+    while pos < n_total:
+        end        = min(pos + track_len, n_total)
+        chunk_len  = end - pos
+        chunk      = raw[:chunk_len].copy()
+
+        # blend incoming copy into the overlap region (all copies except first)
+        if copy_idx > 0:
+            fi_len = min(xfade_n, chunk_len)
+            chunk[:fi_len] *= fade_in[:fi_len]
+
+        # blend outgoing copy in the overlap region (when another copy follows)
+        if chunk_len == track_len and end < n_total:
+            chunk[-xfade_n:] *= fade_out
+
+        out[pos:end] += chunk
+        pos      += step
+        copy_idx += 1
+
+    return out
+
+
+def _music_bed(total_s: float, meta: dict, hook_s: float) -> np.ndarray:
+    """Load, loop (with crossfades), and envelope the music bed for the full timeline.
+
+    hook_s  — seconds of complete silence at the start (first segment dur,
+               clamped to [_MUSIC_HOOK_MIN_S, _MUSIC_HOOK_MAX_S]).
+    Returns zeros (silence) when no track is selected or file is absent.
+    """
+    slug = meta.get("background_music_track") or None
+    if not slug:
+        return np.zeros(int(total_s * SR), np.float32)
+
+    p = ASSETS / "music" / f"{slug}.mp3"
+    if not p.exists():
+        return np.zeros(int(total_s * SR), np.float32)
+
+    raw = _decode_mp3(p)
+    if len(raw) == 0:
+        return np.zeros(int(total_s * SR), np.float32)
+
+    # slice to the loop window detected by analyze_music_loops.py
+    # (loop_start_s skips the intro; loop_end_s stops before the outro fade)
+    loop_start = float(meta.get("music_loop_start_s", 0.0))
+    loop_end   = float(meta.get("music_loop_end_s", len(raw) / SR))
+    s0 = max(0, int(loop_start * SR))
+    s1 = min(len(raw), int(loop_end * SR))
+    if s1 > s0:
+        raw = raw[s0:s1]
+
+    n_total  = int(total_s * SR)
+    xfade_n  = int(_MUSIC_LOOP_XFADE_S * SR)
+    bed      = _tile_with_crossfade(raw, n_total, xfade_n)
+
+    # fade envelope: silent for hook, fade in, sustain, fade out
+    fade_in_s  = float(meta.get("music_fade_in_s",  2.0))
+    fade_out_s = float(meta.get("music_fade_out_s", 2.5))
+
+    hook_n    = int(hook_s * SR)
+    fade_in_n = int(fade_in_s * SR)
+    fade_out_n = int(fade_out_s * SR)
+
+    # silence the hook window
+    hook_end = min(hook_n, n_total)
+    bed[:hook_end] = 0.0
+
+    # fade in after hook (linear ramp)
+    fi_start = hook_end
+    fi_end   = min(fi_start + fade_in_n, n_total)
+    if fi_end > fi_start:
+        bed[fi_start:fi_end] *= np.linspace(0.0, 1.0, fi_end - fi_start,
+                                            dtype=np.float32)
+
+    # fade out at end (linear ramp)
+    fo_start = max(n_total - fade_out_n, fi_end)
+    if fo_start < n_total:
+        bed[fo_start:] *= np.linspace(1.0, 0.0, n_total - fo_start,
+                                      dtype=np.float32)
+
+    return bed
 
 
 # ---------------------------------------------------------------- mastering --
@@ -113,7 +232,11 @@ def build_master(
     voice = _compress(_highpass(voice)) * float(meta.get("voice_master_volume", 1.0))
 
     # 2. music bed, ducked under voice
-    music = _music_bed(total_s)[: len(voice)]
+    # hook_s: silence the music for the first segment so the opening hook
+    # lands clean. Clamped so edge-case durations stay sane.
+    first_seg_dur = segments[0].duration if segments else 0.0
+    hook_s = float(np.clip(first_seg_dur, _MUSIC_HOOK_MIN_S, _MUSIC_HOOK_MAX_S))
+    music = _music_bed(total_s, meta, hook_s)[: len(voice)]
     if len(music) < len(voice):
         music = np.pad(music, (0, len(voice) - len(music)))
     venv = _envelope(voice, int(0.05 * SR))
@@ -205,5 +328,6 @@ def build_master(
         "sfx_events": sfx_log,
         "sfx_cues": len(sfx_log),
         "sfx_skipped_no_asset": skipped,
-        "music_track": meta.get("background_music_track", "synth_tension_drone"),
+        "music_track": meta.get("background_music_track") or "none",
+        "music_hook_silence_s": round(hook_s, 2),
     }

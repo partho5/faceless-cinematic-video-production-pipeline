@@ -31,6 +31,15 @@ models:
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 2000, temperature: 0.2 }
 
+  # Background music selection: picks ONE track from assets/music/catalog.json
+  # based on video niche/tone. Haiku is sufficient — trivial closed-vocab pick.
+  # Offline/failure -> no music (silence), never a crash. Optional stage.
+  music_design:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 200, temperature: 0.2 }
+
   # Title variants / description / tags / chapters
   metadata_text:
     provider: anthropic
