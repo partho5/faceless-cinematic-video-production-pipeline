@@ -776,12 +776,22 @@ class App:
 
 
 def _set_window_icon(root: tk.Tk) -> None:
-    icon_path = ROOT / "assets" / "icon.png"
-    if not icon_path.exists():
+    if os.name == "nt":
+        # iconbitmap(.ico) is the only Tkinter call that sets the taskbar
+        # icon on Windows; wm_iconphoto only affects the title bar.
+        ico_path = ROOT / "assets" / "icon.ico"
+        if ico_path.exists():
+            try:
+                root.iconbitmap(str(ico_path))
+                return
+            except Exception:
+                pass
+    png_path = ROOT / "assets" / "icon.png"
+    if not png_path.exists():
         return
     try:
         from PIL import Image, ImageTk
-        img = Image.open(icon_path)
+        img = Image.open(png_path)
         photo = ImageTk.PhotoImage(img)
         root.wm_iconphoto(True, photo)
         root._icon_ref = photo  # prevent GC
@@ -790,6 +800,15 @@ def _set_window_icon(root: tk.Tk) -> None:
 
 
 def main() -> int:
+    if os.name == "nt":
+        # Prevent Windows from grouping this window with other pythonw.exe
+        # processes on the taskbar; must be called before the Tk window exists.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "VideoProductionStudio.Launcher.1")
+        except Exception:
+            pass
     try:
         root = tk.Tk()
         _set_window_icon(root)
