@@ -55,9 +55,7 @@ models:
     # approved Leda reference). pro-tts is free-tier quota 0.
     model: gemini-3.1-flash-tts-preview
     api_key_env: GEMINI_API_KEY
-    # extra rotation keys read from env: GEMINI_API_KEY_2..N and/or
-    # GEMINI_API_KEYS (comma-separated). Rotated per chapter call + 429 cooldown.
-    api_key_rotation_env: GEMINI_API_KEYS
+    # extra rotation keys: GEMINI_API_KEY_1..N in .env. Rotated per chapter + 429 cooldown.
     voice_name: Leda                    # locked: approved voice
     # AI-Studio-style framing prepended to every chapter (the prompt the
     # user validated). Override per-video via video_meta.tts_scene/tts_context.
