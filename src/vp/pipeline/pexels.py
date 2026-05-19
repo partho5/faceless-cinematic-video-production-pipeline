@@ -148,9 +148,9 @@ class ClipProvider:
     def _make_frame_fn(self, ref: ClipRef, w: int, h: int,
                        dur: float) -> Callable[[float], np.ndarray]:
         if ref.source == "pexels" and ref.path:
-            from moviepy.editor import VideoFileClip  # lazy
+            from moviepy import VideoFileClip  # lazy
 
-            vc = VideoFileClip(str(ref.path), target_resolution=(h, w))
+            vc = VideoFileClip(str(ref.path))
             clip_len = vc.duration or dur
             # take from mid-section, skip 0.5s head/tail (planning/07 §C.4)
             head = 0.5 if clip_len > dur + 1.0 else 0.0

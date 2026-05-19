@@ -115,7 +115,7 @@ class RenderEngine:
         work_dir: Path | None = None,
         audio_track: Path | None = None,
     ) -> dict:
-        from moviepy.editor import AudioFileClip, VideoClip, concatenate_videoclips
+        from moviepy import AudioFileClip, VideoClip, concatenate_videoclips
 
         p = PRESETS[preset]
         work = work_dir or out_path.parent / "_work"
@@ -140,14 +140,14 @@ class RenderEngine:
                     frame = fn(seg, frame, t, ctx)
                 return frame
 
-            clips.append(VideoClip(make_frame, duration=dur).set_fps(p["fps"]))
+            clips.append(VideoClip(make_frame, duration=dur).with_fps(p["fps"]))
 
-        video = concatenate_videoclips(clips, method="chain")
+        video = concatenate_videoclips(clips)
 
         voice = audio_track or (work / "voice.wav")
         if not voice.exists():
             self._build_voice_track(doc.segments, voice)
-        video = video.set_audio(AudioFileClip(str(voice)))
+        video = video.with_audio(AudioFileClip(str(voice)))
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         video.write_videofile(

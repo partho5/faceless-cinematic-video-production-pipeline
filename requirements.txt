@@ -3,7 +3,7 @@ numpy>=1.26
 Pillow>=10.2
 PyYAML>=6.0
 requests>=2.31
-moviepy>=1.0.3
+moviepy>=2.0
 pydub>=0.25.1
 opencv-python-headless>=4.9
 
