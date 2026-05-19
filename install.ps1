@@ -156,6 +156,15 @@ if ($installExit -le 1) {
         Warn "Could not create shortcut: $($_.Exception.Message)"
       }
     }
+    if (Test-Path $lnkPath) {
+      try {
+        $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Video Production Studio.lnk'
+        Copy-Item $lnkPath $desktopLnk -Force
+        Ok "Desktop shortcut created: $desktopLnk"
+      } catch {
+        Warn "Could not copy shortcut to Desktop: $($_.Exception.Message)"
+      }
+    }
   }
 }
 
