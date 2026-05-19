@@ -1,0 +1,78 @@
+# Copy to config.yaml. Defines WHICH model is used for WHICH purpose.
+# Each purpose is independent — swap models per purpose without touching code.
+# Secrets stay in .env; this file only names providers/models/params.
+
+models:
+
+  # Stage 1: topic -> full narration script (creative, high quality)
+  script_generation:
+    provider: anthropic
+    # prod default. Dev: set VP_LLM_MODEL=claude-haiku-4-5-20251001 in .env
+    # to override this + segmentation_direction for cheaper iteration.
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 4000, temperature: 0.9 }
+
+  # Stage 2: approved script -> segmentation + control-signal JSON
+  # (structured, per-chapter; see planning/09 + planning/04)
+  segmentation_direction:
+    provider: anthropic
+    model: claude-sonnet-4-6      # prod default; VP_LLM_MODEL overrides (dev)
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 8000, temperature: 0.4 }
+
+  # Editorial sound design: approved doc + voice alignment -> sparse SFX
+  # cues from the curated 20-effect palette (plan/build-sound-effects.md).
+  # Low temperature: the job is RESTRAINT and consistency, not creativity.
+  # prod default sonnet-4-6; dev: VP_LLM_MODEL overrides (see config.py).
+  sound_design:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 2000, temperature: 0.2 }
+
+  # Title variants / description / tags / chapters
+  metadata_text:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    params: { max_tokens: 1500, temperature: 0.8 }
+
+  # Thumbnail. mode: frame_compose = pick best video frame + Pillow text
+  # (no model). mode: image_gen = generate a background via image model.
+  thumbnail_image:
+    mode: frame_compose
+    image_gen:
+      provider: google
+      model: gemini-2.5-flash-image   # used only when mode: image_gen
+      api_key_env: GEMINI_API_KEY
+
+  # Voiceover. CONTINUOUS per-chapter synthesis (natural model-driven
+  # pacing); segments are sliced from the continuous read, not stitched.
+  tts_audio:
+    provider: google
+    # 3.1-flash-tts: free-tier OK, dramatic spacious cadence (matches the
+    # approved Leda reference). pro-tts is free-tier quota 0.
+    model: gemini-3.1-flash-tts-preview
+    api_key_env: GEMINI_API_KEY
+    # extra rotation keys read from env: GEMINI_API_KEY_2..N and/or
+    # GEMINI_API_KEYS (comma-separated). Rotated per chapter call + 429 cooldown.
+    api_key_rotation_env: GEMINI_API_KEYS
+    voice_name: Leda                    # locked: approved voice
+    # AI-Studio-style framing prepended to every chapter (the prompt the
+    # user validated). Override per-video via video_meta.tts_scene/tts_context.
+    tts_scene: "A dramatic monologue or a suspenseful narrative voiceover."
+    tts_context: >-
+      A psychological thriller, a drama film, or a modern audio drama.
+      It captures the exact moment of a shattered illusion - the quiet,
+      painful epiphany where a victim realizes they have been subtly
+      brainwashed and controlled over a long period.
+    params: { temperature: 1.0 }
+
+  # Word-level timing — local, no API. See planning/06.
+  forced_alignment:
+    provider: local
+    engine: stable-ts
+    model: base            # base|small|medium ; fallback engine: mfa
+
+# Non-model services (keys in .env): PEXELS_API_KEY, YT_* (optional).

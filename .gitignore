@@ -1,6 +1,5 @@
 # secrets
 .env
-config.yaml
 
 # python
 __pycache__/
