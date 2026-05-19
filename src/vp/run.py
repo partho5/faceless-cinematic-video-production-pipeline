@@ -12,8 +12,40 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from pathlib import Path
+
+
+def _ensure_venv_python() -> None:
+    """If a user runs `python -m vp.run ...` with a non-venv Python while
+    .venv exists, re-exec under the venv. Catches the common 'I have a
+    system Python on PATH that imports vp from src/ but is missing the
+    pinned deps (google-genai, modern anthropic)' failure mode.
+
+    Checked via sys.prefix (the venv root, not a symlink) — comparing
+    resolved sys.executable would falsely match on Linux, where the
+    venv's python3 is a symlink to the system interpreter."""
+    here = Path(__file__).resolve()
+    root = here.parents[2]  # src/vp/run.py -> repo root
+    venv_dir = root / ".venv"
+    venv_py = venv_dir / ("Scripts/python.exe" if os.name == "nt"
+                          else "bin/python3")
+    if not venv_py.exists():
+        return
+    try:
+        if Path(sys.prefix).resolve() == venv_dir.resolve():
+            return
+    except Exception:
+        return
+    print(f"[vp] re-launching under venv: {venv_py}", flush=True)
+    raise SystemExit(subprocess.call(
+        [str(venv_py), "-m", "vp.run", *sys.argv[1:]]))
+
+
+_ensure_venv_python()
+
 
 from .config import OUTPUT, get_config
 from .pipeline.align import align_segment

@@ -29,6 +29,37 @@ SRC = ROOT / "src"
 ENV_FILE = ROOT / ".env"
 SAMPLE_SEGMENTS = "6"  # "short sample" cap
 
+
+def _ensure_venv_python() -> None:
+    """If invoked with anything other than the project venv's Python while
+    .venv exists, re-exec under the venv interpreter. Without this, a user
+    double-clicking run.py picks up whatever Python their .py association
+    points at (often a stale system Python missing google-genai or with an
+    ancient anthropic SDK), and the pipeline crashes mid-run. install.bat
+    is run once; this guard makes the result stick.
+
+    Compares sys.prefix (the venv root, never a symlink) instead of
+    resolved sys.executable — on Linux the venv's python3 is a symlink to
+    the system interpreter, so a resolved-path check would falsely match
+    and let the wrong Python through."""
+    venv_dir = ROOT / ".venv"
+    venv_py = venv_dir / ("Scripts/python.exe" if os.name == "nt"
+                          else "bin/python3")
+    if not venv_py.exists():
+        return
+    try:
+        if Path(sys.prefix).resolve() == venv_dir.resolve():
+            return
+    except Exception:
+        return
+    print(f"[run.py] re-launching under venv: {venv_py}", flush=True)
+    raise SystemExit(subprocess.call(
+        [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]]))
+
+
+_ensure_venv_python()
+
+
 try:
     import tkinter as tk
     from tkinter import font as tkfont
