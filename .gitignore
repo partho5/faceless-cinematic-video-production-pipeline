@@ -20,6 +20,11 @@ install.log
 install_report.json
 .python/
 
+# runtime log + generated shortcuts / icon
+run.log
+*.lnk
+assets/icon.ico
+
 # downloaded asset bodies (specs/manifests kept, binaries ignored)
 assets/fonts/*.ttf
 assets/fonts/*.otf
