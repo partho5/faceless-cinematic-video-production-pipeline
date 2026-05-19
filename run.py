@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 ENV_FILE = ROOT / ".env"
 RESUME_FILE = ROOT / ".resume_state.json"
+METADATA_PROFILE = ROOT / ".metadata_profile.json"
 SAMPLE_SEGMENTS = "6"  # "short sample" cap
 _LOG_FILE = ROOT / "run.log"
 
@@ -181,6 +182,53 @@ def _clear_resume_state() -> None:
     RESUME_FILE.unlink(missing_ok=True)
 
 
+_RE_UNSAFE_FILENAME = re.compile(r'[\\/*?:"<>|\x00-\x1f]')
+
+
+def _safe_filename(title: str, max_len: int = 120) -> str:
+    s = _RE_UNSAFE_FILENAME.sub("", title)
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s[:max_len] or "video"
+
+
+def _embed_mp4_metadata(
+    path: "Path",
+    *,
+    title: str | None = None,
+    artist: str | None = None,
+    copyright: str | None = None,
+    encoder: str | None = None,
+) -> None:
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S")
+    tmp = path.with_name(path.stem + "._meta_tmp.mp4")
+    cmd = ["ffmpeg", "-y", "-i", str(path), "-c", "copy",
+           "-metadata", f"creation_time={now}"]
+    if title:     cmd += ["-metadata", f"title={title}"]
+    if artist:    cmd += ["-metadata", f"artist={artist}"]
+    if copyright: cmd += ["-metadata", f"copyright={copyright}"]
+    if encoder:   cmd += ["-metadata", f"encoder={encoder}"]
+    cmd.append(str(tmp))
+    subprocess.run(cmd, check=True, capture_output=True)
+    os.replace(str(tmp), str(path))
+
+
+def _load_meta_profile() -> dict:
+    try:
+        return json.loads(METADATA_PROFILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_meta_profile(data: dict) -> None:
+    try:
+        METADATA_PROFILE.write_text(json.dumps(data, ensure_ascii=False,
+                                                indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 class App:
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
@@ -188,6 +236,7 @@ class App:
         self.q: queue.Queue[str] = queue.Queue()
         self.last_argv: list[str] = []
         self.out_dir: Path | None = None
+        self.video_path: Path | None = None
         self.review_script: Path | None = None
         self.review_pending = False
         self._resuming = False
@@ -195,6 +244,7 @@ class App:
         self._disp = 0         # currently displayed % (animated toward target)
         self._anim_job = None
         self._creep_job = None
+        self._placeholders: dict = {}
 
         master.title("Video Production Studio")
         master.geometry("880x860")
@@ -207,10 +257,17 @@ class App:
         body = self._scrollable(master)
 
         self._build_header(body)
-        self._build_content(body)
-        self._build_output(body)
-        ttk.Separator(body, style="Hair.TSeparator").pack(
-            fill="x", pady=(14, 12))
+
+        nb = ttk.Notebook(body)
+        nb.pack(fill="x", pady=(16, 0))
+        tab_content = ttk.Frame(nb, style="App.TFrame")
+        tab_output = ttk.Frame(nb, style="App.TFrame")
+        nb.add(tab_content, text="  Content  ")
+        nb.add(tab_output, text="  Output  ")
+        self._build_content(tab_content)
+        self._build_output(tab_output)
+
+        tk.Frame(body, bg=T.WARN, height=3).pack(fill="x", pady=(14, 12))
         self._build_actions(body)
         self._build_status(body)
         self._build_progress(body)
@@ -423,6 +480,9 @@ class App:
                      lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
         st.map("TEntry", bordercolor=[("focus", T.ACCENT)])
 
+        st.map("TButton",
+               foreground=[("active", "#000000")])
+
         st.configure("Accent.TButton", background=T.ACCENT,
                      foreground="#FFFFFF", borderwidth=0, focuscolor=T.ACCENT,
                      padding=(18, 9), font=self.f_sec)
@@ -445,6 +505,18 @@ class App:
         st.configure("Bar.Horizontal.TProgressbar", background=T.ACCENT,
                      troughcolor=T.INPUT, bordercolor=T.BORDER,
                      lightcolor=T.ACCENT, darkcolor=T.ACCENT, thickness=10)
+
+        st.configure("TNotebook", background=T.BG, borderwidth=1,
+                     bordercolor=T.BORDER, tabmargins=(0, 0, 0, 0))
+        st.configure("TNotebook.Tab", background=T.PANEL, foreground=T.MUTED,
+                     padding=(16, 7), focuscolor=T.PANEL,
+                     bordercolor=T.BORDER, lightcolor=T.BORDER)
+        st.map("TNotebook.Tab",
+               background=[("selected", T.BG), ("active", T.BORDER)],
+               foreground=[("selected", T.FG), ("active", T.FG)],
+               padding=[("selected", (16, 7))],
+               lightcolor=[("selected", T.ACCENT)],
+               bordercolor=[("selected", T.ACCENT)])
 
     # -- sections ----------------------------------------------------------
     def _build_header(self, p) -> None:
@@ -527,6 +599,94 @@ class App:
                         ).grid(row=4, column=0, columnspan=3, sticky="w",
                                pady=1)
         o.columnconfigure(2, weight=1)
+        self._build_metadata_section(p)
+
+    def _build_metadata_section(self, p) -> None:
+        m = self._card(p, "Meta Data")
+
+        self.meta_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(m, variable=self.meta_enabled,
+                        style="Switch.TCheckbutton",
+                        text="Add metadata to exported video",
+                        command=self._toggle_meta_fields
+                        ).grid(row=0, column=0, columnspan=2, sticky="w",
+                               pady=(0, 10))
+
+        # Output Filename + Title are NOT persisted (auto-filled after each run)
+        # Author / Copyright / Encoder ARE persisted
+        fields = [
+            ("Output Filename",  "meta_filename",  False, ""),
+            ("Title",            "meta_title",     False, ""),
+            ("Author / Artist",  "meta_author",    True,  "your name or channel name"),
+            ("Copyright",        "meta_copyright", True,  "© 2026 Your Channel"),
+            ("Encoder",          "meta_encoder",   True,  "software or studio name"),
+        ]
+        for i, (label, attr, _persisted, _ph) in enumerate(fields, start=1):
+            ttk.Label(m, text=label, style="On.TLabel").grid(
+                row=i, column=0, sticky="w", padx=(0, 14), pady=3)
+            e = ttk.Entry(m)
+            e.grid(row=i, column=1, sticky="we", pady=3)
+            setattr(self, attr, e)
+
+        row_cd = len(fields) + 1
+        ttk.Label(m, text="Creation date", style="On.TLabel").grid(
+            row=row_cd, column=0, sticky="w", padx=(0, 14), pady=(3, 0))
+        ttk.Label(m, text="set automatically to export date",
+                  style="MutedOn.TLabel").grid(
+            row=row_cd, column=1, sticky="w", pady=(3, 0))
+
+        self.set_meta_btn = ttk.Button(
+            m, text="Set Metadata", style="Ghost.TButton",
+            command=self.on_set_metadata, state="disabled")
+        self.set_meta_btn.grid(row=row_cd + 1, column=0, columnspan=2,
+                               sticky="e", pady=(12, 0))
+
+        m.columnconfigure(1, weight=1)
+
+        prof = _load_meta_profile()
+        self.meta_enabled.set(prof.get("enabled", True))
+        for attr in ("meta_author", "meta_copyright", "meta_encoder"):
+            val = prof.get(attr.removeprefix("meta_"), "")
+            if val:
+                getattr(self, attr).insert(0, val)
+
+        for _label, attr, _persisted, ph in fields:
+            if ph:
+                e = getattr(self, attr)
+                self._placeholder_setup(e, ph)
+                if not e.get():
+                    e.insert(0, ph)
+                    e.configure(foreground=T.MUTED)
+
+        self._toggle_meta_fields()
+
+    def _toggle_meta_fields(self) -> None:
+        state = "normal" if self.meta_enabled.get() else "disabled"
+        for attr in ("meta_filename", "meta_title", "meta_author",
+                     "meta_copyright", "meta_encoder"):
+            getattr(self, attr).configure(state=state)
+
+    def _placeholder_setup(self, entry: ttk.Entry, hint: str) -> None:
+        self._placeholders[entry] = hint
+
+        def on_focus_in(_evt=None):
+            if entry.get() == hint:
+                entry.delete(0, "end")
+                entry.configure(foreground=T.FG)
+
+        def on_focus_out(_evt=None):
+            if not entry.get().strip():
+                entry.delete(0, "end")
+                entry.insert(0, hint)
+                entry.configure(foreground=T.MUTED)
+
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
+
+    def _ph_val(self, entry: ttk.Entry) -> str:
+        """Return entry value, or '' if the placeholder hint is showing."""
+        val = entry.get().strip()
+        return "" if val == self._placeholders.get(entry, "\x00") else val
 
     def _build_actions(self, p) -> None:
         bar = ttk.Frame(p, style="App.TFrame")
@@ -715,10 +875,17 @@ class App:
         if self.proc and self.proc.poll() is None:
             messagebox.showinfo("Busy", "A render is already running.")
             return
+        _save_meta_profile({
+            "enabled": self.meta_enabled.get(),
+            "author": self._ph_val(self.meta_author),
+            "copyright": self._ph_val(self.meta_copyright),
+            "encoder": self._ph_val(self.meta_encoder),
+        })
         argv = self._argv()
         if not argv:
             return
         self.out_dir = None
+        self.video_path = None
         self.review_script = None
         self.review_pending = False
         self._pct = 0
@@ -729,6 +896,7 @@ class App:
         self.pct_lbl.configure(text="0%", foreground=T.FG)
         self.stage_lbl.configure(text="starting…")
         self.approve_btn.configure(state="disabled")
+        self.set_meta_btn.configure(state="disabled")
         self.open_btn.pack_forget()
         self.last_argv = argv
         self._launch(argv)
@@ -832,13 +1000,104 @@ class App:
             if done:
                 _clear_resume_state()
                 self._set_pct(100, "Finished")
-                final = (f"{self.out_dir}/final.mp4"
-                         if self.out_dir else "output/<slug>/final.mp4")
+                self._post_run_meta_fill()
+                final = str(self.video_path) if self.video_path else (
+                    f"{self.out_dir}/final.mp4"
+                    if self.out_dir else "output/<slug>/final.mp4")
                 self._append(f"\n✅ Finished — see {final}\n")
                 self.open_btn.pack(side="right", padx=(0, 10))
             else:
                 self.stage_lbl.configure(text="Stopped")
                 self._append("\n■ Process ended.\n")
+
+    def _post_run_meta_fill(self) -> None:
+        if not self.out_dir:
+            return
+        meta_json = self.out_dir / "metadata.json"
+        if not meta_json.exists():
+            return
+        try:
+            meta = json.loads(meta_json.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        title = meta.get("title", "")
+        safe = _safe_filename(title) if title else "video"
+
+        # auto-fill Title and Filename (not persisted)
+        for attr, val in (("meta_title", title), ("meta_filename", safe)):
+            e = getattr(self, attr)
+            e.configure(state="normal")
+            e.delete(0, "end")
+            if val:
+                e.insert(0, val)
+        if not self.meta_enabled.get():
+            self.meta_title.configure(state="disabled")
+            self.meta_filename.configure(state="disabled")
+
+        # rename final.mp4 → <safe title>.mp4
+        final = self.out_dir / "final.mp4"
+        named = self.out_dir / f"{safe}.mp4"
+        if final.exists():
+            try:
+                final.rename(named)
+                self.video_path = named
+            except Exception:
+                self.video_path = final
+        elif named.exists():
+            self.video_path = named
+
+        # auto-embed if checkbox is ticked
+        if self.meta_enabled.get() and self.video_path \
+                and self.video_path.exists():
+            try:
+                _embed_mp4_metadata(
+                    self.video_path,
+                    title=title or None,
+                    artist=self._ph_val(self.meta_author) or None,
+                    copyright=self._ph_val(self.meta_copyright) or None,
+                    encoder=self._ph_val(self.meta_encoder) or None,
+                )
+            except Exception as exc:
+                self._append(f"\n[warn] metadata embed failed: {exc}\n")
+
+        self.set_meta_btn.configure(state="normal")
+
+    def on_set_metadata(self) -> None:
+        if not self.video_path or not self.video_path.exists():
+            messagebox.showwarning("No video",
+                                   "No completed video found in this session.")
+            return
+
+        new_name = _safe_filename(self.meta_filename.get().strip())
+        new_path = self.video_path.parent / f"{new_name}.mp4"
+
+        try:
+            # rename if filename changed
+            if new_path != self.video_path:
+                self.video_path.rename(new_path)
+                self.video_path = new_path
+
+            _embed_mp4_metadata(
+                self.video_path,
+                title=self.meta_title.get().strip() or None,
+                artist=self._ph_val(self.meta_author) or None,
+                copyright=self._ph_val(self.meta_copyright) or None,
+                encoder=self._ph_val(self.meta_encoder) or None,
+            )
+
+            _save_meta_profile({
+                "enabled": self.meta_enabled.get(),
+                "author": self._ph_val(self.meta_author),
+                "copyright": self._ph_val(self.meta_copyright),
+                "encoder": self._ph_val(self.meta_encoder),
+            })
+
+            messagebox.showinfo(
+                "Metadata set",
+                f"Metadata embedded successfully.\n\n{self.video_path.name}")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to set metadata:\n{exc}")
 
 
 def _set_window_icon(root: tk.Tk) -> None:

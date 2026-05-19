@@ -66,11 +66,37 @@ def _log(msg: str) -> None:
     print(f"[vp] {msg}", flush=True)
 
 
+def _embed_mp4_metadata(
+    path: Path, *,
+    title: str | None = None,
+    artist: str | None = None,
+    copyright: str | None = None,
+    encoder: str | None = None,
+) -> None:
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    tmp = path.with_name(path.stem + "._meta_tmp.mp4")
+    cmd = ["ffmpeg", "-y", "-i", str(path), "-c", "copy",
+           "-metadata", f"creation_time={now}"]
+    if title:     cmd += ["-metadata", f"title={title}"]
+    if artist:    cmd += ["-metadata", f"artist={artist}"]
+    if copyright: cmd += ["-metadata", f"copyright={copyright}"]
+    if encoder:   cmd += ["-metadata", f"encoder={encoder}"]
+    cmd.append(str(tmp))
+    subprocess.run(cmd, check=True, capture_output=True)
+    os.replace(str(tmp), str(path))
+
+
 def run(topic: str, *, preset: str = "preview", approve: bool = False,
         segments: int | None = None, do_upload: bool = True,
         tts_scene: str | None = None, tts_context: str | None = None,
         target_minutes: float = 6.0, hint: str | None = None,
-        resume: bool = False) -> dict:
+        resume: bool = False,
+        meta_embed: bool = False,
+        meta_title: str | None = None,
+        meta_artist: str | None = None,
+        meta_copyright: str | None = None,
+        meta_encoder: str | None = None) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -186,6 +212,12 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
                       audio_track=out / "master.wav")
     _log(f"render -> final.mp4 {info['resolution']} {info['duration']:.2f}s")
 
+    if meta_embed:
+        _embed_mp4_metadata(out / "final.mp4", title=meta_title,
+                            artist=meta_artist, copyright=meta_copyright,
+                            encoder=meta_encoder)
+        _log("mp4 metadata: embedded")
+
     # 8. metadata + thumbnail
     meta = MetadataStage(cfg).run(out / "final.mp4", doc,
                                   script_path.read_text(encoding="utf-8"), out)
@@ -254,11 +286,20 @@ def main(argv=None) -> int:
     ap.add_argument("--resume", action="store_true",
                     help="reuse existing script.md / video.json artifacts "
                          "to skip completed API stages")
+    ap.add_argument("--meta-embed", action="store_true",
+                    help="embed MP4 metadata tags into the final video")
+    ap.add_argument("--meta-title",     default=None)
+    ap.add_argument("--meta-author",    default=None)
+    ap.add_argument("--meta-copyright", default=None)
+    ap.add_argument("--meta-encoder",   default=None)
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
             tts_scene=a.tts_scene, tts_context=a.tts_context,
-            target_minutes=a.minutes, hint=a.hint, resume=a.resume)
+            target_minutes=a.minutes, hint=a.hint, resume=a.resume,
+            meta_embed=a.meta_embed, meta_title=a.meta_title,
+            meta_artist=a.meta_author, meta_copyright=a.meta_copyright,
+            meta_encoder=a.meta_encoder)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 
