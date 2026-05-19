@@ -98,6 +98,54 @@ except Exception:  # pragma: no cover - environment without Tk
     sys.exit(1)
 
 
+# ----------------------------------------------------------------- voice data ----
+_GEMINI_VOICES = [
+    "Achernar", "Aoede", "Algieba", "Charon", "Despina", "Enceladus",
+    "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia",
+    "Leda", "Orus", "Puck", "Pulcherrima", "Sadachbia", "Schedar",
+    "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
+]
+
+# (display label, BCP-47 code passed to Gemini; "" = let the model auto-detect)
+_GEMINI_LANGUAGES: list[tuple[str, str]] = [
+    ("Auto (detect)",           ""),
+    ("Arabic",                  "ar-XA"),
+    ("Bengali",                 "bn-IN"),
+    ("Chinese (Simplified)",    "cmn-CN"),
+    ("Chinese (Traditional)",   "cmn-TW"),
+    ("Dutch",                   "nl-NL"),
+    ("English",                 "en-US"),
+    ("French",                  "fr-FR"),
+    ("German",                  "de-DE"),
+    ("Greek",                   "el-GR"),
+    ("Gujarati",                "gu-IN"),
+    ("Hindi",                   "hi-IN"),
+    ("Indonesian",              "id-ID"),
+    ("Italian",                 "it-IT"),
+    ("Japanese",                "ja-JP"),
+    ("Kannada",                 "kn-IN"),
+    ("Korean",                  "ko-KR"),
+    ("Malayalam",               "ml-IN"),
+    ("Marathi",                 "mr-IN"),
+    ("Polish",                  "pl-PL"),
+    ("Portuguese (Brazil)",     "pt-BR"),
+    ("Portuguese (Portugal)",   "pt-PT"),
+    ("Punjabi",                 "pa-IN"),
+    ("Romanian",                "ro-RO"),
+    ("Russian",                 "ru-RU"),
+    ("Spanish",                 "es-ES"),
+    ("Swedish",                 "sv-SE"),
+    ("Tamil",                   "ta-IN"),
+    ("Telugu",                  "te-IN"),
+    ("Thai",                    "th-TH"),
+    ("Turkish",                 "tr-TR"),
+    ("Ukrainian",               "uk-UA"),
+    ("Vietnamese",              "vi-VN"),
+]
+_LANG_LABEL_TO_CODE = {label: code for label, code in _GEMINI_LANGUAGES}
+_LANG_CODE_TO_LABEL = {code: label for label, code in _GEMINI_LANGUAGES}
+_LANG_LABELS = [label for label, _ in _GEMINI_LANGUAGES]
+
 # ----------------------------------------------------------------- theme ----
 class T:
     BG = "#0E1116"          # app background
@@ -301,6 +349,10 @@ class App:
         self.upload.set(state.get("upload", False))
         self.review.set(state.get("review", False))
         self.sample.set(state.get("sample", False))
+        self.voice_var.set(state.get("voice", "Leda"))
+        self.lang_var.set(state.get("language_label", _LANG_LABELS[0]))
+        self.sub_lang_var.set(state.get("subtitle_language_label",
+                                        "Auto (same as Script Language)"))
         self._resuming = True
         self.on_run()
         self._resuming = False
@@ -480,6 +532,23 @@ class App:
                      lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
         st.map("TEntry", bordercolor=[("focus", T.ACCENT)])
 
+        st.configure("TCombobox", fieldbackground=T.INPUT, foreground=T.FG,
+                     background=T.PANEL, bordercolor=T.BORDER,
+                     arrowcolor=T.FG, selectbackground=T.ACCENT,
+                     selectforeground=T.FG, insertcolor=T.FG,
+                     lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
+        st.map("TCombobox",
+               fieldbackground=[("readonly", T.INPUT), ("disabled", T.BG)],
+               foreground=[("readonly", T.FG), ("disabled", T.MUTED)],
+               bordercolor=[("focus", T.ACCENT)])
+        # style the dropdown listbox (option_add must happen before any
+        # combobox is shown, so we do it here at style-init time)
+        self.master.option_add("*TCombobox*Listbox.background", T.INPUT)
+        self.master.option_add("*TCombobox*Listbox.foreground", T.FG)
+        self.master.option_add("*TCombobox*Listbox.selectBackground", T.ACCENT)
+        self.master.option_add("*TCombobox*Listbox.selectForeground", T.FG)
+        self.master.option_add("*TCombobox*Listbox.relief", "flat")
+
         st.map("TButton",
                foreground=[("active", "#000000")])
 
@@ -505,6 +574,13 @@ class App:
         st.configure("Bar.Horizontal.TProgressbar", background=T.ACCENT,
                      troughcolor=T.INPUT, bordercolor=T.BORDER,
                      lightcolor=T.ACCENT, darkcolor=T.ACCENT, thickness=10)
+
+        st.configure("Vertical.TScrollbar",
+                     background=T.MUTED, troughcolor=T.PANEL,
+                     bordercolor=T.PANEL, arrowcolor=T.FG,
+                     lightcolor=T.BORDER, darkcolor=T.BORDER)
+        st.map("Vertical.TScrollbar",
+               background=[("active", "#A371F7"), ("pressed", "#8957E5")])
 
         st.configure("TNotebook", background=T.BG, borderwidth=1,
                      bordercolor=T.BORDER, tabmargins=(0, 0, 0, 0))
@@ -561,6 +637,7 @@ class App:
                             highlightcolor=T.ACCENT, padx=8, pady=6)
         self.hint.grid(row=4, column=0, sticky="we")
         c.columnconfigure(0, weight=1)
+        self._build_voice_section(p)
 
     def _build_output(self, p) -> None:
         o = self._card(p, "Output Settings")
@@ -600,6 +677,43 @@ class App:
                                pady=1)
         o.columnconfigure(2, weight=1)
         self._build_metadata_section(p)
+
+    def _build_voice_section(self, p) -> None:
+        v = self._card(p, "Voice")
+
+        ttk.Label(v, text="Voice", style="On.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 14), pady=4)
+        self.voice_var = tk.StringVar(value="Leda")
+        voice_cb = ttk.Combobox(v, textvariable=self.voice_var,
+                                values=_GEMINI_VOICES, state="readonly", width=24)
+        voice_cb.grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Label(v, text="Gemini prebuilt voice name",
+                  style="MutedOn.TLabel").grid(row=0, column=2, sticky="w",
+                                               padx=(10, 0))
+
+        ttk.Label(v, text="Script Language", style="On.TLabel").grid(
+            row=1, column=0, sticky="w", padx=(0, 14), pady=4)
+        self.lang_var = tk.StringVar(value=_LANG_LABELS[0])
+        lang_cb = ttk.Combobox(v, textvariable=self.lang_var,
+                               values=_LANG_LABELS, state="readonly", width=28)
+        lang_cb.grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(v, text="spoken language for the Gemini TTS voice",
+                  style="MutedOn.TLabel").grid(row=1, column=2, sticky="w",
+                                               padx=(10, 0))
+
+        _SUB_AUTO = "Auto (same as Script Language)"
+        _sub_labels = [_SUB_AUTO] + _LANG_LABELS[1:]   # skip "Auto (detect)"
+        ttk.Label(v, text="Subtitle Language", style="On.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 14), pady=4)
+        self.sub_lang_var = tk.StringVar(value=_SUB_AUTO)
+        sub_cb = ttk.Combobox(v, textvariable=self.sub_lang_var,
+                              values=_sub_labels, state="readonly", width=28)
+        sub_cb.grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(v, text="on-screen text language (LLM prompts stay English)",
+                  style="MutedOn.TLabel").grid(row=2, column=2, sticky="w",
+                                               padx=(10, 0))
+
+        v.columnconfigure(2, weight=1)
 
     def _build_metadata_section(self, p) -> None:
         m = self._card(p, "Meta Data")
@@ -868,6 +982,18 @@ class App:
             argv += ["--segments", SAMPLE_SEGMENTS]
         if self._resuming:
             argv.append("--resume")
+        voice = self.voice_var.get().strip()
+        if voice and voice != "Leda":
+            argv += ["--voice", voice]
+        lang_code = _LANG_LABEL_TO_CODE.get(self.lang_var.get(), "")
+        if lang_code:
+            argv += ["--language", lang_code]
+        sub_label = self.sub_lang_var.get()
+        # only pass when the user explicitly chose a language (not "Auto")
+        if not sub_label.startswith("Auto"):
+            sub_code = _LANG_LABEL_TO_CODE.get(sub_label, "")
+            if sub_code:
+                argv += ["--subtitle-language", sub_code]
         return argv
 
     # -- run ---------------------------------------------------------------
@@ -937,6 +1063,9 @@ class App:
             "upload": self.upload.get(),
             "review": self.review.get(),
             "sample": self.sample.get(),
+            "voice": self.voice_var.get(),
+            "language_label": self.lang_var.get(),
+            "subtitle_language_label": self.sub_lang_var.get(),
         })
         self.run_btn.configure(state="disabled", text="Running…")
         shown = list(argv)

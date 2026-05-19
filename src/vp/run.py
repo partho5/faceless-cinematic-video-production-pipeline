@@ -96,7 +96,10 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         meta_title: str | None = None,
         meta_artist: str | None = None,
         meta_copyright: str | None = None,
-        meta_encoder: str | None = None) -> dict:
+        meta_encoder: str | None = None,
+        voice: str | None = None,
+        language: str | None = None,
+        subtitle_language: str | None = None) -> dict:
     cfg = get_config()
     for w in cfg.validate():
         _log(f"warn: {w}")
@@ -193,6 +196,18 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         _vs.scene = tts_scene
     if tts_context:
         _vs.context = tts_context
+    if voice:
+        _vs.voice = voice
+    if language:
+        _vs.language = language
+    # Subtitle language is stored for the render / translation stage.
+    # IMPORTANT: any LLM call that translates text_overlay into the target
+    # language MUST be prompted entirely in English (e.g. "Translate the
+    # following English text to <lang>: ...") so Claude never receives a
+    # non-English system prompt and cannot hallucinate in an unfamiliar
+    # instruction language.
+    _subtitle_language = subtitle_language or language or ""
+    _log(f"subtitle language: {_subtitle_language or 'auto (same as TTS)'}")
     vr = _vs.synthesize(doc, out / "audio")
     _log(f"voice: {vr.chapters} chapters -> {vr.segments} segment slices "
          f"(keys={vr.key_count}, offline={vr.offline})")
@@ -326,6 +341,15 @@ def main(argv=None) -> int:
     ap.add_argument("--meta-author",    default=None)
     ap.add_argument("--meta-copyright", default=None)
     ap.add_argument("--meta-encoder",   default=None)
+    ap.add_argument("--voice", default=None,
+                    help="Gemini prebuilt voice name (e.g. Leda, Charon, Puck)")
+    ap.add_argument("--language", default=None,
+                    help="BCP-47 language code for TTS (e.g. en-US, fr-FR); "
+                         "omit to let Gemini auto-detect from script text")
+    ap.add_argument("--subtitle-language", default=None,
+                    help="BCP-47 code for on-screen subtitle text language; "
+                         "defaults to the TTS language when omitted. "
+                         "Any translation uses English-prompted LLM calls only.")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
@@ -333,7 +357,9 @@ def main(argv=None) -> int:
             target_minutes=a.minutes, hint=a.hint, resume=a.resume,
             meta_embed=a.meta_embed, meta_title=a.meta_title,
             meta_artist=a.meta_author, meta_copyright=a.meta_copyright,
-            meta_encoder=a.meta_encoder)
+            meta_encoder=a.meta_encoder,
+            voice=a.voice, language=a.language,
+            subtitle_language=a.subtitle_language)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

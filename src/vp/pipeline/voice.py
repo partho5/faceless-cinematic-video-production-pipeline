@@ -132,10 +132,10 @@ class VoiceResult:
 
 
 def _cache_key(text: str, voice: str, model: str,
-               scene: str, context: str) -> str:
+               scene: str, context: str, language: str = "") -> str:
     """Invalidates if the spoken text OR any prompt-affecting param changes."""
     h = hashlib.sha1()
-    for part in (model, voice, scene, context, text):
+    for part in (model, voice, scene, context, language, text):
         h.update((part or "").strip().encode("utf-8"))
         h.update(b"\x00")
     return h.hexdigest()
@@ -194,16 +194,29 @@ class VoiceStage:
         self.context = (cfg_get(cfg, "tts_context")
                         or self.spec.extra.get("tts_context", ""))
         self.voice = self.spec.extra.get("voice_name", "Leda")
+        self.language: str = ""   # BCP-47 code; "" = let Gemini auto-detect
 
     def _synth(self, pool: KeyPool, text: str) -> np.ndarray:
         from google.genai import types
 
-        gcfg = types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
+        speech_kw: dict = {}
+        if self.language:
+            speech_kw["language_code"] = self.language
+        try:
+            speech_cfg = types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=self.voice))),
+                        voice_name=self.voice)),
+                **speech_kw,
+            )
+        except TypeError:
+            speech_cfg = types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=self.voice)))
+        gcfg = types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=speech_cfg,
         )
         prompt = _prompt(self.spec, self.scene, self.context, text)
         last = None
@@ -262,7 +275,7 @@ class VoiceStage:
             if not text:
                 continue
             key = _cache_key(text, self.voice, self.spec.model,
-                             self.scene, self.context)
+                             self.scene, self.context, self.language)
             pcm, al = _load_cached(key)
             if pcm is not None:                       # cache hit -> 0 API calls
                 cached += 1
