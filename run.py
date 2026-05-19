@@ -745,8 +745,23 @@ class App:
                 self._append("\n■ Process ended.\n")
 
 
+def _set_window_icon(root: tk.Tk) -> None:
+    icon_path = ROOT / "assets" / "icon.png"
+    if not icon_path.exists():
+        return
+    try:
+        from PIL import Image, ImageTk
+        img = Image.open(icon_path)
+        photo = ImageTk.PhotoImage(img)
+        root.wm_iconphoto(True, photo)
+        root._icon_ref = photo  # prevent GC
+    except Exception:
+        pass
+
+
 def main() -> int:
     root = tk.Tk()
+    _set_window_icon(root)
     App(root)
     root.mainloop()
     return 0

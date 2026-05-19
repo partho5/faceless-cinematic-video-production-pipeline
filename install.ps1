@@ -122,4 +122,29 @@ if (-not $py) {
 }
 
 & $py (Join-Path $Root 'install.py') @args
-exit $LASTEXITCODE
+$installExit = $LASTEXITCODE
+
+if ($installExit -le 1) {
+  $venvPythonw = Join-Path $Root '.venv\Scripts\pythonw.exe'
+  $pngPath     = Join-Path $Root 'assets\icon.png'
+  $icoPath     = Join-Path $Root 'assets\icon.ico'
+  $lnkPath     = Join-Path $Root 'Video Production Studio.lnk'
+
+  if ((Test-Path $venvPythonw) -and (Test-Path $pngPath)) {
+    if (-not (Test-Path $icoPath)) {
+      & $venvPythonw -c "from PIL import Image; Image.open(r'$pngPath').save(r'$icoPath')" 2>$null
+    }
+    if ((Test-Path $icoPath) -and -not (Test-Path $lnkPath)) {
+      $ws = New-Object -ComObject WScript.Shell
+      $sc = $ws.CreateShortcut($lnkPath)
+      $sc.TargetPath      = $venvPythonw
+      $sc.Arguments       = "`"$Root\run.py`""
+      $sc.IconLocation    = $icoPath
+      $sc.WorkingDirectory = $Root
+      $sc.Save()
+      Ok "Launcher created: Video Production Studio.lnk"
+    }
+  }
+}
+
+exit $installExit
