@@ -155,13 +155,13 @@ class SegmentStage:
         return json.loads(raw[raw.index("["): raw.rindex("]") + 1])
 
     def generate(self, script_path: Path, out_dir: Path,
-                 *, max_repair: int = 2) -> ControlDocument:
+                 *, max_repair: int = 2, topic: str | None = None) -> ControlDocument:
         if self.spec.offline:
             _log("stage2: offline -> sample control document")
             doc = load_sample_document()
         else:
             try:
-                doc = self._generate_live(script_path, out_dir)
+                doc = self._generate_live(script_path, out_dir, topic=topic)
             except Exception as e:
                 _log(f"stage2: live segmentation failed ({e}); "
                      f"falling back to sample document")
@@ -176,7 +176,8 @@ class SegmentStage:
                                             encoding="utf-8")
         return doc
 
-    def _generate_live(self, script_path: Path, out_dir: Path) -> ControlDocument:
+    def _generate_live(self, script_path: Path, out_dir: Path,
+                       *, topic: str | None = None) -> ControlDocument:
         base = load_sample_document()  # reuse meta/chapters/global_assets shell
         chapters = split_chapters(script_path.read_text(encoding="utf-8"))
         n = len(chapters)
@@ -213,6 +214,8 @@ class SegmentStage:
                 break
         d = base.to_dict()
         d["segments"] = all_segs or d["segments"]
+        if topic:
+            d["video_meta"]["title"] = topic
         return ControlDocument.from_dict(d)
 
 

@@ -144,7 +144,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         except Exception:
             doc = None
     if doc is None:
-        doc = SegmentStage(cfg).generate(script_path, out)
+        doc = SegmentStage(cfg).generate(script_path, out, topic=topic)
     if segments:
         doc.segments = doc.segments[:segments]
     res = validate(doc)
