@@ -153,7 +153,8 @@ class T:
     INPUT = "#0D1117"       # entry / text fields
     FG = "#E6EDF3"          # primary text
     MUTED = "#8B949E"       # secondary text
-    BORDER = "#30363D"      # hairlines / field borders
+    BORDER = "#30363D"      # hairlines / separators
+    BORDER_INPUT = "#484F58" # input field resting border (muted but visible)
     ACCENT = "#2F81F7"      # primary action
     ACCENT_HOVER = "#4493F8"
     OK = "#3FB950"          # success / configured
@@ -545,19 +546,26 @@ class App:
             pass  # element already created (style re-init) — keep existing
 
         st.configure("TEntry", fieldbackground=T.INPUT, foreground=T.FG,
-                     bordercolor=T.BORDER, insertcolor=T.FG,
-                     lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
-        st.map("TEntry", bordercolor=[("focus", T.ACCENT)])
+                     bordercolor=T.BORDER_INPUT, insertcolor=T.FG,
+                     lightcolor=T.BORDER_INPUT, darkcolor=T.BORDER_INPUT,
+                     relief="solid", borderwidth=1, padding=6)
+        st.map("TEntry",
+               bordercolor=[("focus", T.ACCENT)],
+               lightcolor=[("focus", T.ACCENT)],
+               darkcolor=[("focus", T.ACCENT)])
 
         st.configure("TCombobox", fieldbackground=T.INPUT, foreground=T.FG,
-                     background=T.PANEL, bordercolor=T.BORDER,
+                     background=T.PANEL, bordercolor=T.BORDER_INPUT,
                      arrowcolor=T.FG, selectbackground=T.ACCENT,
                      selectforeground=T.FG, insertcolor=T.FG,
-                     lightcolor=T.BORDER, darkcolor=T.BORDER, padding=6)
+                     lightcolor=T.BORDER_INPUT, darkcolor=T.BORDER_INPUT,
+                     relief="solid", borderwidth=1, padding=6)
         st.map("TCombobox",
                fieldbackground=[("readonly", T.INPUT), ("disabled", T.BG)],
                foreground=[("readonly", T.FG), ("disabled", T.MUTED)],
-               bordercolor=[("focus", T.ACCENT)])
+               bordercolor=[("focus", T.ACCENT)],
+               lightcolor=[("focus", T.ACCENT)],
+               darkcolor=[("focus", T.ACCENT)])
         # style the dropdown listbox (option_add must happen before any
         # combobox is shown, so we do it here at style-init time)
         self.master.option_add("*TCombobox*Listbox.background", T.INPUT)
@@ -650,7 +658,7 @@ class App:
         self.hint = tk.Text(c, height=5, wrap="word", relief="flat",
                             bg=T.INPUT, fg=T.FG, insertbackground=T.FG,
                             selectbackground=T.ACCENT, font=self.f_base,
-                            highlightthickness=1, highlightbackground=T.BORDER,
+                            highlightthickness=1, highlightbackground=T.BORDER_INPUT,
                             highlightcolor=T.ACCENT, padx=8, pady=6)
         self.hint.grid(row=4, column=0, sticky="we")
         c.columnconfigure(0, weight=1)
