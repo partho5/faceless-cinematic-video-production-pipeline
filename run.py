@@ -1199,6 +1199,15 @@ class App:
             "  • Add more keys: GEMINI_API_KEY_1, GEMINI_API_KEY_2, …\n"
             "  • Get additional keys at: aistudio.google.com/app/apikey",
         ),
+        "LLM_ALL_FAILED": (
+            "All AI Providers Failed",
+            "Both Anthropic and Gemini failed to respond.\n\n"
+            "Possible causes:\n"
+            "  • No internet connection\n"
+            "  • Both API keys are invalid or expired\n"
+            "  • A temporary service outage\n\n"
+            "Check your .env file and try again.",
+        ),
     }
 
     def _show_api_error(self, err_type: str, detail: str) -> None:
