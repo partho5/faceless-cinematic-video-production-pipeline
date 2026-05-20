@@ -22,6 +22,10 @@ _PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-4-7": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
+    # OpenRouter free-tier fallback models — $0 cost
+    "openai/gpt-oss-120b:free": (0.0, 0.0),
+    "deepseek/deepseek-v4-flash:free": (0.0, 0.0),
+    "meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
 }
 # fallback for an unknown/new model id (Sonnet-class), flagged in the report.
 _FALLBACK = (3.0, 15.0)

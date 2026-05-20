@@ -61,14 +61,14 @@ _OPENROUTER_DEFAULT_MODELS = [
 ]
 
 
-def _openrouter_text(system: str, user: str) -> str:
+def _openrouter_text(system: str, user: str) -> tuple[str, str]:
     """OpenRouter free-tier text generation with key + model rotation.
 
     Tries every key on every model in the cascade before giving up.
     Per-key errors are recorded and skipped so that a bad key, rate-limit
     burst, or transient error on one key does not abort the entire
     fallback. Raises RuntimeError only when every key × model combination
-    has failed.
+    has failed. Returns (text, model_id) so the caller can record the call.
     """
     keys = _collect_openrouter_keys()
     if not keys:
@@ -111,7 +111,7 @@ def _openrouter_text(system: str, user: str) -> str:
                     f"[vp] OpenRouter fallback succeeded via {model}",
                     flush=True,
                 )
-                return text
+                return text, model
             except Exception as e:
                 last_err = e
                 # urllib hides the HTTP response body in HTTPError; surface
@@ -179,7 +179,10 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
         flush=True,
     )
     try:
-        return _openrouter_text(system, user)
+        text, or_model = _openrouter_text(system, user)
+        from .cost import record
+        record(or_model, None, getattr(spec, "purpose", "llm"))
+        return text
     except Exception as openrouter_exc:
         # Both providers failed — log OpenRouter's reason so the user can see
         # it, then print the specific sentinel for the GUI dialog.
