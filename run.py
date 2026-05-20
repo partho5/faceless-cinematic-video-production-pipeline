@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -311,6 +312,7 @@ class App:
         self._placeholders: dict = {}
         self._api_error: tuple[str, str] | None = None
         self._last_rc: int | None = None
+        self._start_time: float | None = None
 
         master.title(_APP_NAME)
         master.geometry("880x860")
@@ -1108,7 +1110,10 @@ class App:
             i = shown.index("--hint")
             h = shown[i + 1].replace("\n", " ")
             shown[i + 1] = (h[:60] + "…") if len(h) > 60 else h
-        self._append(f"\n$ {' '.join(shown)}\n\n")
+        self._start_time = time.time()
+        ts = time.strftime("%H:%M:%S", time.localtime(self._start_time))
+        self._append(f"\n$ {' '.join(shown)}\n")
+        self._append(f"Started at {ts}\n\n")
         threading.Thread(target=self._worker, args=(argv,),
                          daemon=True).start()
 
@@ -1155,6 +1160,12 @@ class App:
             pass
 
         self.run_btn.configure(state="normal", text="Create Video")
+        if self._start_time is not None:
+            elapsed = time.time() - self._start_time
+            m, s = divmod(int(elapsed), 60)
+            ts = time.strftime("%H:%M:%S")
+            self._append(f"\nFinished at {ts} — Total time: {m}m {s}s\n")
+            self._start_time = None
         if self.review_pending and self.review_script \
                 and self.review_script.exists():
             self.approve_btn.configure(state="normal")

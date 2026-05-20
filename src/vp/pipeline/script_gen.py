@@ -161,12 +161,22 @@ class SegmentStage:
 
     def _anthropic_chapter(self, label: str, text: str, prior_repair: str | None):
         from ..llm import anthropic_message  # lazy
+        from ..schema.model import _num
 
         user = f"Chapter [{label}]:\n{text}"
         if prior_repair:
             user += f"\n\nThe previous output FAILED validation: {prior_repair}\nFix and resend."
         raw = anthropic_message(self.spec, system=_SEG_SYS, user=user)
-        return json.loads(raw[raw.index("["): raw.rindex("]") + 1])
+        segs = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
+        # Normalize start/end early — free-tier fallback models often emit
+        # "m:ss" strings where Claude emits floats. _repair_zero_timestamps
+        # runs on these raw dicts before the dataclass coerces them.
+        for s in segs:
+            if "start" in s:
+                s["start"] = _num(s["start"])
+            if "end" in s:
+                s["end"] = _num(s["end"])
+        return segs
 
     def generate(self, script_path: Path, out_dir: Path,
                  *, max_repair: int = 2, topic: str | None = None) -> ControlDocument:

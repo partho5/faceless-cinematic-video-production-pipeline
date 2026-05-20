@@ -1,19 +1,26 @@
-"""Anthropic call helper with Gemini fallback.
+"""Anthropic call helper with OpenRouter free-tier fallback.
 
 Primary provider: Anthropic. On ANY Anthropic failure the identical prompt
-is retried via Google Gemini, rotating through all available GEMINI_API_KEY*
-values (same keys the TTS stage uses). If every provider also fails, a
-[API_ERROR:…] sentinel is printed so the GUI can surface a user-friendly
-dialog.
+is retried via OpenRouter, rotating through all available OPENROUTER_API_KEY*
+values and a cascade of free long-context models. If every provider also
+fails, a [API_ERROR:…] sentinel is printed so the GUI can surface a
+user-friendly dialog.
+
+TTS continues to use Gemini exclusively — see pipeline/tts_gemini.py and
+pipeline/voice.py. This module no longer touches Gemini.
 """
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
 
 
-def _collect_gemini_keys() -> list[str]:
-    """All usable Gemini keys: GEMINI_API_KEY + GEMINI_API_KEYS comma-list
-    + GEMINI_API_KEY_1…24.  Mirrors voice.collect_keys without importing it.
+def _collect_openrouter_keys() -> list[str]:
+    """All usable OpenRouter keys: OPENROUTER_API_KEY + OPENROUTER_API_KEYS
+    comma-list + OPENROUTER_API_KEY_1…24.  Mirrors the Gemini key collection
+    pattern used by the TTS stage.
 
     Config loads .env into its own dict, NOT into os.environ, so we must
     also parse the .env file directly — otherwise keys set only in .env are
@@ -33,64 +40,100 @@ def _collect_gemini_keys() -> list[str]:
             seen.add(v)
             out.append(v)
 
-    _add(env.get("GEMINI_API_KEY", ""))
-    for k in env.get("GEMINI_API_KEYS", "").split(","):
+    _add(env.get("OPENROUTER_API_KEY", ""))
+    for k in env.get("OPENROUTER_API_KEYS", "").split(","):
         _add(k)
     for i in range(1, 25):
-        _add(env.get(f"GEMINI_API_KEY_{i}", ""))
+        _add(env.get(f"OPENROUTER_API_KEY_{i}", ""))
     return out
 
 
-def _gemini_text(system: str, user: str) -> str:
-    """Gemini text generation with key + model rotation.
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    Tries every key on every model (Pro → Flash) before giving up.
-    Rate-limit errors (429 / RESOURCE_EXHAUSTED) skip to the next key.
-    All other per-key errors are recorded and also skipped so that a bad
-    key or a transient error on one key does not abort the entire fallback.
-    Raises RuntimeError only when every key × model combination has failed.
+# Three free long-context models from three different upstream vendors.
+# Uncorrelated outages: when DeepSeek's free endpoint is saturated, the
+# Meta/Qwen pools usually aren't. Override the whole cascade with the
+# OPENROUTER_LLM_MODEL env var (single model only).
+_OPENROUTER_DEFAULT_MODELS = [
+    "openai/gpt-oss-120b:free",
+    "deepseek/deepseek-v4-flash:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+]
+
+
+def _openrouter_text(system: str, user: str) -> str:
+    """OpenRouter free-tier text generation with key + model rotation.
+
+    Tries every key on every model in the cascade before giving up.
+    Per-key errors are recorded and skipped so that a bad key, rate-limit
+    burst, or transient error on one key does not abort the entire
+    fallback. Raises RuntimeError only when every key × model combination
+    has failed.
     """
-    from google import genai
-    from google.genai import types
-
-    keys = _collect_gemini_keys()
+    keys = _collect_openrouter_keys()
     if not keys:
-        raise RuntimeError("no Gemini API keys available for fallback")
+        raise RuntimeError("no OpenRouter API keys available for fallback")
 
-    # Quality cascade: Pro → Flash. Override via GEMINI_LLM_MODEL env var.
-    override = os.environ.get("GEMINI_LLM_MODEL", "").strip()
-    models = [override] if override else ["gemini-2.5-pro", "gemini-2.5-flash"]
+    override = os.environ.get("OPENROUTER_LLM_MODEL", "").strip()
+    models = [override] if override else _OPENROUTER_DEFAULT_MODELS
 
-    from .gemini_rate import get_limiter
-    _rate = get_limiter()
     last_err: Exception | None = None
     for model in models:
         for key in keys:
             try:
-                _rate.acquire(key)
-                client = genai.Client(api_key=key)
-                resp = client.models.generate_content(
-                    model=model,
-                    contents=user,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        response_modalities=["TEXT"],
-                    ),
+                payload = json.dumps({
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "max_tokens": 4000,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    _OPENROUTER_URL,
+                    method="POST",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                        # Optional analytics headers OpenRouter recommends;
+                        # harmless if the receiver ignores them.
+                        "HTTP-Referer": "https://github.com/anthropic/video-production",
+                        "X-Title": "Video Production Studio",
+                    },
+                    data=payload,
                 )
-                text = resp.candidates[0].content.parts[0].text
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                text = body["choices"][0]["message"]["content"]
                 if not text:
-                    raise ValueError("empty response from Gemini")
-                print(f"[vp] Gemini fallback succeeded via {model}", flush=True)
+                    raise ValueError("empty response from OpenRouter")
+                print(
+                    f"[vp] OpenRouter fallback succeeded via {model}",
+                    flush=True,
+                )
                 return text
             except Exception as e:
                 last_err = e
+                # urllib hides the HTTP response body in HTTPError; surface
+                # it so users can see "rate-limited" vs "invalid key" etc.
+                detail = str(e)
+                if isinstance(e, urllib.error.HTTPError):
+                    try:
+                        detail = (
+                            f"HTTP {e.code} "
+                            f"{e.read().decode('utf-8', errors='replace')[:200]}"
+                        )
+                    except Exception:
+                        detail = f"HTTP {e.code}"
                 print(
-                    f"[vp] Gemini key failed ({model}): {str(e)[:120]} — trying next…",
+                    f"[vp] OpenRouter key failed ({model}): {detail[:200]} "
+                    f"— trying next…",
                     flush=True,
                 )
                 continue
     raise RuntimeError(
-        f"all Gemini keys/models exhausted during Anthropic fallback: {last_err}"
+        f"all OpenRouter keys/models exhausted during Anthropic fallback: "
+        f"{last_err}"
     )
 
 
@@ -130,18 +173,18 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
                getattr(spec, "purpose", "llm"))
         return "".join(b.text for b in msg.content if b.type == "text")
 
-    # ---------------------------------------------------------------- Gemini fallback
+    # ---------------------------------------------------------------- OpenRouter fallback
     print(
-        f"[vp] warn: Anthropic failed ({str(anthropic_exc)[:80]}) — retrying via Gemini…",
+        f"[vp] warn: Anthropic failed ({str(anthropic_exc)[:80]}) — retrying via OpenRouter…",
         flush=True,
     )
     try:
-        return _gemini_text(system, user)
-    except Exception as gemini_exc:
-        # Both providers failed — log Gemini's reason so the user can see it,
-        # then print the specific sentinel for the GUI dialog.
+        return _openrouter_text(system, user)
+    except Exception as openrouter_exc:
+        # Both providers failed — log OpenRouter's reason so the user can see
+        # it, then print the specific sentinel for the GUI dialog.
         print(
-            f"[vp] warn: Gemini fallback also failed ({str(gemini_exc)[:120]})",
+            f"[vp] warn: OpenRouter fallback also failed ({str(openrouter_exc)[:120]})",
             flush=True,
         )
         _err = str(anthropic_exc)
