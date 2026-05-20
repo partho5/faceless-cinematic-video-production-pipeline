@@ -55,9 +55,16 @@ def _gemini_text(system: str, user: str) -> str:
             resp = client.models.generate_content(
                 model=model,
                 contents=user,
-                config=types.GenerateContentConfig(system_instruction=system),
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    response_modalities=["TEXT"],
+                ),
             )
-            return resp.text
+            # Use explicit part path — resp.text raises in some SDK versions
+            text = resp.candidates[0].content.parts[0].text
+            if not text:
+                raise ValueError("empty response from Gemini")
+            return text
         except Exception as e:
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 last_err = e
