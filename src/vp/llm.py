@@ -27,11 +27,27 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
     try:
         msg = client.messages.create(**kwargs)
     except anthropic.BadRequestError as e:
-        if "temperature" in str(e).lower() and "temperature" in kwargs:
+        detail = str(e)
+        if "temperature" in detail.lower() and "temperature" in kwargs:
             kwargs.pop("temperature")
             msg = client.messages.create(**kwargs)
         else:
+            detail_lower = detail.lower()
+            if any(k in detail_lower for k in (
+                "credit balance", "billing", "upgrade", "purchase credits",
+            )):
+                print(f"[vp] [API_ERROR:ANTHROPIC_CREDITS] {detail[:200]}", flush=True)
             raise
+    except anthropic.AuthenticationError as e:
+        print(f"[vp] [API_ERROR:ANTHROPIC_KEY_INVALID] {str(e)[:200]}", flush=True)
+        raise
+    except anthropic.PermissionDeniedError as e:
+        detail = str(e).lower()
+        etype = ("ANTHROPIC_CREDITS"
+                 if any(k in detail for k in ("credit", "billing", "balance", "payment"))
+                 else "ANTHROPIC_KEY_INVALID")
+        print(f"[vp] [API_ERROR:{etype}] {str(e)[:200]}", flush=True)
+        raise
 
     # plug-and-play cost tracking (best-effort; tagged by config purpose)
     from .cost import record

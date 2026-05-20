@@ -235,11 +235,25 @@ class VoiceStage:
                 return np.frombuffer(data, dtype="<i2").astype(np.float32) / 32767.0
             except Exception as e:  # 429 -> park key, rotate; else re-raise
                 last = e
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    KeyPool.park(key, str(e))
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    KeyPool.park(key, err_str)
                     failures += 1
                     continue
+                err_lower = err_str.lower()
+                if any(c in err_lower for c in (
+                    "401", "unauthenticated", "api_key_invalid",
+                    "permission_denied", "invalid api key", "api key not valid",
+                )):
+                    print(
+                        f"[vp] [API_ERROR:GEMINI_KEY_INVALID] {err_str[:200]}",
+                        flush=True,
+                    )
                 raise
+        print(
+            f"[vp] [API_ERROR:GEMINI_QUOTA] {failures} attempts all rate-limited",
+            flush=True,
+        )
         raise RuntimeError(
             f"all keys exhausted after {failures} rate-limited attempts: {last}")
 

@@ -293,6 +293,7 @@ class App:
         self._anim_job = None
         self._creep_job = None
         self._placeholders: dict = {}
+        self._api_error: tuple[str, str] | None = None
 
         master.title("Video Production Studio")
         master.geometry("880x860")
@@ -917,6 +918,9 @@ class App:
 
     def _scan(self, line: str) -> None:
         s = line.strip()
+        _ae = re.match(r'\[vp\] \[API_ERROR:([A-Z_]+)\] (.*)', s)
+        if _ae:
+            self._api_error = (str(_ae.group(1)), str(_ae.group(2)))
         if s.startswith("[vp] output dir:") or " output dir:" in s:
             try:
                 self.out_dir = Path(s.split("output dir:", 1)[1].strip())
@@ -1014,6 +1018,7 @@ class App:
         self.video_path = None
         self.review_script = None
         self.review_pending = False
+        self._api_error = None
         self._pct = 0
         self._disp = 0
         self._cancel("_anim_job")
@@ -1109,6 +1114,15 @@ class App:
             self.master.after(0, self._finished)
 
     def _finished(self) -> None:
+        # drain any lines that arrived after the last _drain() tick
+        try:
+            while True:
+                line = self.q.get_nowait()
+                self._scan(line)
+                self._append(line)
+        except queue.Empty:
+            pass
+
         self.run_btn.configure(state="normal", text="Create Video")
         if self.review_pending and self.review_script \
                 and self.review_script.exists():
@@ -1138,6 +1152,61 @@ class App:
             else:
                 self.stage_lbl.configure(text="Stopped")
                 self._append("\n■ Process ended.\n")
+                if self._api_error:
+                    err_type, err_detail = self._api_error
+                    self._api_error = None
+                    self.master.after(
+                        100, lambda t=err_type, d=err_detail:
+                        self._show_api_error(t, d))
+
+    _API_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
+        "KEY_NOT_SET": (
+            "API Key Not Configured",
+            "An API key is missing from your .env file.\n\n"
+            "{detail}\n\n"
+            "Steps to fix:\n"
+            "  1. Open the .env file in the project folder\n"
+            "  2. Add the missing key (e.g.  ANTHROPIC_API_KEY=sk-ant-…)\n"
+            "  3. Save the file and click Create Video again.",
+        ),
+        "ANTHROPIC_KEY_INVALID": (
+            "Anthropic API Key Invalid",
+            "Your Anthropic API key was rejected (invalid or expired).\n\n"
+            "Fix:\n"
+            "  1. Open your .env file\n"
+            "  2. Update ANTHROPIC_API_KEY with a valid key\n"
+            "  3. Get or rotate keys at: console.anthropic.com → API Keys",
+        ),
+        "ANTHROPIC_CREDITS": (
+            "Anthropic Credits Insufficient",
+            "Your Anthropic account has insufficient credits to complete "
+            "this request.\n\n"
+            "Fix: add credits at console.anthropic.com → Billing",
+        ),
+        "GEMINI_KEY_INVALID": (
+            "Gemini API Key Invalid",
+            "Your Gemini API key was rejected by Google (invalid or expired).\n\n"
+            "Fix:\n"
+            "  1. Open your .env file\n"
+            "  2. Update GEMINI_API_KEY with a valid key\n"
+            "  3. Get or rotate keys at: aistudio.google.com/app/apikey",
+        ),
+        "GEMINI_QUOTA": (
+            "Gemini API Quota Exhausted",
+            "All your Gemini API keys hit their rate limit or daily quota.\n\n"
+            "Options:\n"
+            "  • Wait and retry (quotas reset hourly or daily)\n"
+            "  • Add more keys: GEMINI_API_KEY_1, GEMINI_API_KEY_2, …\n"
+            "  • Get additional keys at: aistudio.google.com/app/apikey",
+        ),
+    }
+
+    def _show_api_error(self, err_type: str, detail: str) -> None:
+        title, body_tmpl = self._API_ERROR_MESSAGES.get(
+            err_type,
+            ("API Error", "An API error stopped the pipeline.\n\n{detail}"),
+        )
+        messagebox.showerror(title, body_tmpl.format(detail=detail))
 
     def _post_run_meta_fill(self) -> None:
         if not self.out_dir:

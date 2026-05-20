@@ -169,28 +169,26 @@ class Config:
     )
 
     def validate(self) -> list[str]:
-        """Fail fast on structural errors; return non-fatal warnings.
-
-        Missing API keys are warnings (=> offline mode), NOT errors, so the
-        pipeline stays runnable without secrets (planning/07 build trigger).
-        """
+        """Fail fast on structural or credential errors; return non-fatal warnings."""
         missing = [p for p in self.REQUIRED_PURPOSES if p not in self._models]
         if missing:
             raise ConfigError(f"config.yaml missing required purposes: {missing}")
 
-        warnings: list[str] = []
         for purpose, m in self._models.items():
-            # Warn ONLY when a purpose is genuinely offline (no primary AND
-            # no rotation key). No primary-specific check: a rotation pool
-            # alone is a fully valid online setup.
             if m.api_key_env and self.effective_offline(purpose):
-                warnings.append(
-                    f"{purpose}: no usable key "
-                    f"({m.api_key_env} or rotation) -> OFFLINE stub"
+                print(
+                    f"[vp] [API_ERROR:KEY_NOT_SET] {m.api_key_env} not configured"
+                    f" (required for '{purpose}')",
+                    flush=True,
+                )
+                raise ConfigError(
+                    f"Missing API key for '{purpose}': "
+                    f"{m.api_key_env} (or rotation keys) not set — "
+                    f"set the key in .env or environment and retry."
                 )
         for d in (ASSETS, OUTPUT, CACHE, CLIP_CACHE):
             d.mkdir(parents=True, exist_ok=True)
-        return warnings
+        return []
 
     def resolved_models_manifest(self) -> dict[str, dict[str, Any]]:
         """Per-purpose resolved model snapshot for render_manifest.json (G14)."""
