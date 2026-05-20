@@ -127,6 +127,31 @@ _SEG_SYS = (
 )
 
 
+def _repair_zero_timestamps(all_segs: list[dict], n_chapters: int, base) -> None:
+    """Evenly distribute timestamps for any chapter where the LLM emitted all zeros.
+
+    Gemini occasionally emits start=0/end=0 for all segments in a chapter.
+    These are ordering targets only (G1 reflow overwrites with real audio timing),
+    but the validator requires end > start. Assigns synthetic slots so the
+    pipeline is not blocked.
+    """
+    total = float((base.video_meta or {}).get("total_duration_seconds", 0) or 0)
+    slot = (total / n_chapters) if (total > 0 and n_chapters > 0) else 60.0
+    for ci in range(1, n_chapters + 1):
+        prefix = f"c{ci}_"
+        ch = [s for s in all_segs if (s.get("id") or "").startswith(prefix)]
+        if not ch:
+            continue
+        if not all(float(s.get("start", 0)) == 0 and float(s.get("end", 0)) == 0
+                   for s in ch):
+            continue  # LLM gave real timestamps — don't touch
+        ch_start = (ci - 1) * slot
+        step = slot / len(ch)
+        for i, s in enumerate(ch):
+            s["start"] = round(ch_start + i * step, 2)
+            s["end"] = round(ch_start + (i + 1) * step, 2)
+
+
 class SegmentStage:
     """Approved script -> validated canonical ControlDocument (G3)."""
 
@@ -194,6 +219,7 @@ class SegmentStage:
                 break
         if not all_segs:
             raise RuntimeError("stage2: no segments produced from any chapter")
+        _repair_zero_timestamps(all_segs, len(chapters), base)
         d = base.to_dict()
         d["segments"] = all_segs
         if topic:

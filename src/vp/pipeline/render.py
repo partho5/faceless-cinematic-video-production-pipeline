@@ -115,7 +115,8 @@ class RenderEngine:
         work_dir: Path | None = None,
         audio_track: Path | None = None,
     ) -> dict:
-        from moviepy import AudioFileClip, VideoClip, concatenate_videoclips
+        import subprocess as _sp
+        from moviepy import VideoClip
 
         p = PRESETS[preset]
         work = work_dir or out_path.parent / "_work"
@@ -128,35 +129,59 @@ class RenderEngine:
             assets_root=ASSETS,
         )
 
-        clips = []
-        for seg in doc.segments:
+        # Render one segment at a time to avoid accumulating open
+        # VideoFileClip / ffmpeg subprocesses in memory simultaneously.
+        seg_paths: list[Path] = []
+        for i, seg in enumerate(doc.segments):
             dur = max(0.1, seg.duration)
             base_make = self.visual_source(seg, ctx)
             chain = self.frame_chain
 
-            def make_frame(t: float, seg=seg, base_make=base_make, chain=chain):
-                frame = base_make(t)
-                for fn in chain:
-                    frame = fn(seg, frame, t, ctx)
+            def make_frame(t: float, _s=seg, _b=base_make, _c=chain):
+                frame = _b(t)
+                for fn in _c:
+                    frame = fn(_s, frame, t, ctx)
                 return frame
 
-            clips.append(VideoClip(make_frame, duration=dur).with_fps(p["fps"]))
+            seg_path = work / f"_seg_{i:04d}.mp4"
+            clip = VideoClip(make_frame, duration=dur).with_fps(p["fps"])
+            clip.write_videofile(
+                str(seg_path), fps=p["fps"], codec="libx264",
+                preset="ultrafast", logger=None, threads=4,
+            )
+            clip.close()
+            # release the Pexels VideoFileClip / ffmpeg subprocess immediately
+            if hasattr(base_make, "close"):
+                base_make.close()
+            seg_paths.append(seg_path)
 
-        video = concatenate_videoclips(clips)
-
+        # Prepare audio track
         voice = audio_track or (work / "voice.wav")
         if not voice.exists():
             self._build_voice_track(doc.segments, voice)
-        video = video.with_audio(AudioFileClip(str(voice)))
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        video.write_videofile(
-            str(out_path), fps=p["fps"], codec="libx264", audio_codec="aac",
-            preset="ultrafast", logger=None, threads=4,
+        # Concatenate all segment videos and mux audio in one ffmpeg pass
+        # (no re-encode of video: stream copy keeps quality and is fast)
+        concat_list = work / "_concat.txt"
+        concat_list.write_text(
+            "\n".join(f"file '{sp.as_posix()}'" for sp in seg_paths),
+            encoding="utf-8",
         )
-        for c in clips:
-            c.close()
-        video.close()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        _sp.run(
+            ["ffmpeg", "-y",
+             "-f", "concat", "-safe", "0", "-i", str(concat_list),
+             "-i", str(voice),
+             "-c:v", "copy", "-c:a", "aac", "-shortest",
+             str(out_path)],
+            check=True, capture_output=True,
+        )
+
+        # Clean up temp files
+        for sp in seg_paths:
+            sp.unlink(missing_ok=True)
+        concat_list.unlink(missing_ok=True)
+
         return {
             "path": str(out_path),
             "duration": round(tl.total_duration, 3),

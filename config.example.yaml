@@ -68,4 +68,12 @@ models:
     engine: stable-ts
     model: base            # base|small|medium ; fallback engine: mfa
 
+# Gemini rate limiting — applies to TTS + LLM fallback calls combined.
+# tier: free  → proactive per-key sliding-window cap at `rpm` req/min.
+# tier: paid (or section absent) → no throttling; existing 429-reactive
+#   logic handles bursts without any added delay.
+gemini:
+  tier: free   # free | paid
+  rpm: 10      # requests per minute per key (Gemini free-tier default)
+
 # Non-model services (keys in .env): PEXELS_API_KEY, YT_* (optional).

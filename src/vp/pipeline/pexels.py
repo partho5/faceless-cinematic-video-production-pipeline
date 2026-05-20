@@ -162,11 +162,14 @@ class ClipProvider:
                     tt = start + (local_t % max(0.1, clip_len - start))
                 f = vc.get_frame(tt)
                 if f.shape[0] != h or f.shape[1] != w:
-                    yi = (np.linspace(0, f.shape[0] - 1, h)).astype(int)
-                    xi = (np.linspace(0, f.shape[1] - 1, w)).astype(int)
+                    yi = np.linspace(0, f.shape[0] - 1, h, dtype=int)
+                    xi = np.linspace(0, f.shape[1] - 1, w, dtype=int)
                     f = f[yi][:, xi]
                 return f.astype(np.uint8)
 
+            # expose close() so the render loop can release the ffmpeg
+            # subprocess immediately after the segment is written to disk
+            make.close = vc.close
             return make
 
         base = _procedural_base(ref.query + ref.id, w, h)
@@ -186,14 +189,16 @@ class ClipProvider:
 
         if seg.camera_motion == "rapid_clip_montage" and seg.montage_clips:
             spans, t0 = [], 0.0
+            fns: list = []
             total_plan = sum(m.duration for m in seg.montage_clips) or dur
             for m in seg.montage_clips:
                 seg_dur = dur * (m.duration / total_plan)
                 ref = self._resolve(m.query, "", seg.beat_type, seg_dur)
                 self.manifest.append({"segment": seg.id, "clip": ref.id,
                                       "source": ref.source, "query": ref.query})
-                spans.append((t0, t0 + seg_dur,
-                              self._make_frame_fn(ref, w, h, seg_dur)))
+                fn = self._make_frame_fn(ref, w, h, seg_dur)
+                fns.append(fn)
+                spans.append((t0, t0 + seg_dur, fn))
                 t0 += seg_dur
 
             def make(local_t: float, spans=spans):
@@ -202,6 +207,12 @@ class ClipProvider:
                         return fn(local_t - a)
                 return spans[-1][2](local_t - spans[-1][0])
 
+            def _close_montage(fns=fns):
+                for fn in fns:
+                    if hasattr(fn, "close"):
+                        fn.close()
+
+            make.close = _close_montage
             return make
 
         ref = self._resolve(seg.clip_query_primary, seg.clip_query_backup,

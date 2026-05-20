@@ -97,7 +97,13 @@ def validate(
         seen_ids.add(s.id)
 
         if s.end <= s.start:
-            r.errors.append(f"{s.id}: end {s.end} <= start {s.start}")
+            # start/end are ordering targets only; G1 reflow overwrites with
+            # real audio-measured timing. Repair rather than reject.
+            r.warnings.append(
+                f"{s.id}: end {s.end} <= start {s.start} "
+                f"-> synthetic +2 s slot (G1 reflow overwrites)"
+            )
+            s.end = s.start + 2.0
         if not (s.tts_scene and s.tts_scene.strip()):
             r.errors.append(f"{s.id}: tts_scene empty")
         if not (s.tts_delivery and s.tts_delivery.strip()):

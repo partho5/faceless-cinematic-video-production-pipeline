@@ -23,6 +23,7 @@ install_report.json
 # runtime log + generated shortcuts / icon
 run.log
 .resume_state.json
+.metadata_profile.json
 *.lnk
 assets/icon.ico
 
@@ -41,6 +42,9 @@ assets/SFX-Sound-Effects/
 # moviepy render temp artifacts
 *TEMP_MPY_*.mp4
 *TEMP_MPY_*.mp3
+
+# Claude Code local config
+.claude/
 
 # IDE / OS
 .idea/

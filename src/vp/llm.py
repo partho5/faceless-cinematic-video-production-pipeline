@@ -42,11 +42,13 @@ def _collect_gemini_keys() -> list[str]:
 
 
 def _gemini_text(system: str, user: str) -> str:
-    """Gemini text generation with key rotation.
+    """Gemini text generation with key + model rotation.
 
-    Cycles through every available key; a 429 / RESOURCE_EXHAUSTED skips
-    to the next key. Any other error propagates immediately. Raises
-    RuntimeError if all keys are rate-limited.
+    Tries every key on every model (Pro → Flash) before giving up.
+    Rate-limit errors (429 / RESOURCE_EXHAUSTED) skip to the next key.
+    All other per-key errors are recorded and also skipped so that a bad
+    key or a transient error on one key does not abort the entire fallback.
+    Raises RuntimeError only when every key × model combination has failed.
     """
     from google import genai
     from google.genai import types
@@ -59,10 +61,13 @@ def _gemini_text(system: str, user: str) -> str:
     override = os.environ.get("GEMINI_LLM_MODEL", "").strip()
     models = [override] if override else ["gemini-2.5-pro", "gemini-2.5-flash"]
 
+    from .gemini_rate import get_limiter
+    _rate = get_limiter()
     last_err: Exception | None = None
     for model in models:
         for key in keys:
             try:
+                _rate.acquire(key)
                 client = genai.Client(api_key=key)
                 resp = client.models.generate_content(
                     model=model,
@@ -78,13 +83,14 @@ def _gemini_text(system: str, user: str) -> str:
                 print(f"[vp] Gemini fallback succeeded via {model}", flush=True)
                 return text
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    last_err = e
-                    continue
-                raise
-        # All keys exhausted for this model — try next model in cascade
+                last_err = e
+                print(
+                    f"[vp] Gemini key failed ({model}): {str(e)[:120]} — trying next…",
+                    flush=True,
+                )
+                continue
     raise RuntimeError(
-        f"all Gemini keys rate-limited during Anthropic fallback: {last_err}"
+        f"all Gemini keys/models exhausted during Anthropic fallback: {last_err}"
     )
 
 

@@ -950,6 +950,11 @@ class App:
                 self.out_dir = Path(s.split("output dir:", 1)[1].strip())
             except Exception:
                 pass
+        if "DONE — deliverable at " in s:
+            try:
+                self.video_path = Path(s.split("DONE — deliverable at ", 1)[1].strip())
+            except Exception:
+                pass
         if "REVIEW_REQUIRED " in s:
             self.review_script = Path(s.split("REVIEW_REQUIRED ", 1)[1].strip())
             self.review_pending = True
@@ -1257,43 +1262,39 @@ class App:
         )
 
     def _post_run_meta_fill(self) -> None:
-        if not self.out_dir:
-            return
-        meta_json = self.out_dir / "metadata.json"
-        if not meta_json.exists():
-            return
-        try:
-            meta = json.loads(meta_json.read_text(encoding="utf-8"))
-        except Exception:
-            return
+        title = ""
 
-        title = meta.get("title", "")
-        safe = _safe_filename(title) if title else "video"
-
-        # auto-fill Title and Filename (not persisted)
-        for attr, val in (("meta_title", title), ("meta_filename", safe)):
-            e = getattr(self, attr)
-            e.configure(state="normal")
-            e.delete(0, "end")
-            if val:
-                e.insert(0, val)
-        if not self.meta_enabled.get():
-            self.meta_title.configure(state="disabled")
-            self.meta_filename.configure(state="disabled")
-
-        # rename <slug>.mp4 → <safe title>.mp4
-        final = self.out_dir / f"{self.out_dir.name}.mp4"
-        named = self.out_dir / f"{safe}.mp4"
-        if final.exists():
+        if self.out_dir:
+            meta_json = self.out_dir / "metadata.json"
             try:
-                final.rename(named)
-                self.video_path = named
+                meta = json.loads(meta_json.read_text(encoding="utf-8"))
+                title = meta.get("title", "")
             except Exception:
-                self.video_path = final
-        elif named.exists():
-            self.video_path = named
+                pass
 
-        # auto-embed if checkbox is ticked
+            if title:
+                safe = _safe_filename(title)
+                # auto-fill Title and Filename (not persisted)
+                for attr, val in (("meta_title", title), ("meta_filename", safe)):
+                    e = getattr(self, attr)
+                    e.configure(state="normal")
+                    e.delete(0, "end")
+                    e.insert(0, val)
+                if not self.meta_enabled.get():
+                    self.meta_title.configure(state="disabled")
+                    self.meta_filename.configure(state="disabled")
+
+                # rename <slug>.mp4 → <safe title>.mp4 if needed
+                if self.video_path and self.video_path.exists():
+                    named = self.video_path.parent / f"{safe}.mp4"
+                    if named != self.video_path:
+                        try:
+                            self.video_path.rename(named)
+                            self.video_path = named
+                        except Exception:
+                            pass
+
+        # auto-embed if checkbox is ticked and we have a video
         if self.meta_enabled.get() and self.video_path \
                 and self.video_path.exists():
             try:
@@ -1304,6 +1305,7 @@ class App:
                     copyright=self._ph_val(self.meta_copyright) or None,
                     encoder=self._ph_val(self.meta_encoder) or None,
                 )
+                self._append("\n✅ Metadata embedded automatically.\n")
             except Exception as exc:
                 self._append(f"\n[warn] metadata embed failed: {exc}\n")
 

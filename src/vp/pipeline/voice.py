@@ -226,8 +226,11 @@ class VoiceStage:
         # still finite so a permanent daily-quota exhaustion can't hang.
         max_failures = max(8, pool.size * 3)
         failures = 0
+        from ..gemini_rate import get_limiter
+        _rate = get_limiter()
         while failures < max_failures:
             key, client = pool.acquire()
+            _rate.acquire(key.value)
             try:
                 r = client.models.generate_content(
                     model=self.spec.model, contents=prompt, config=gcfg)

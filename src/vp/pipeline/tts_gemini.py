@@ -97,8 +97,11 @@ class TTSEngine:
                 )
             ),
         )
+        from ..gemini_rate import get_limiter
+        _rate = get_limiter()
         for attempt in range(max_retries):
             try:
+                _rate.acquire(self.spec.api_key or "")
                 resp = self._gemini().models.generate_content(
                     model=self.spec.model, contents=prompt, config=cfg
                 )
