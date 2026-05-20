@@ -233,11 +233,16 @@ class VoiceStage:
                     model=self.spec.model, contents=prompt, config=gcfg)
                 data = r.candidates[0].content.parts[0].inline_data.data
                 return np.frombuffer(data, dtype="<i2").astype(np.float32) / 32767.0
-            except Exception as e:  # 429 -> park key, rotate; else re-raise
+            except Exception as e:  # 429 -> park key; 500 -> rotate; else re-raise
                 last = e
                 err_str = str(e)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                     KeyPool.park(key, err_str)
+                    failures += 1
+                    continue
+                if "500" in err_str or "INTERNAL" in err_str or \
+                        "ServerError" in type(e).__name__:
+                    # Transient server error — rotate to next key, no cooldown
                     failures += 1
                     continue
                 err_lower = err_str.lower()

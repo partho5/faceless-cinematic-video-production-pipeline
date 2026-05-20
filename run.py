@@ -186,6 +186,21 @@ _MILESTONES: list[tuple[str, int, str]] = [
 _RE_CHAPTER = re.compile(r"stage2: chapter (\d+)/(\d+)")
 
 
+def _app_name() -> str:
+    """Read APP_NAME from .env; fall back to default."""
+    if ENV_FILE.exists():
+        for raw in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.startswith("APP_NAME="):
+                v = line.partition("=")[2].strip().strip('"').strip("'")
+                if v:
+                    return v
+    return "Video Production Studio"
+
+
+_APP_NAME = _app_name()
+
+
 def _detect_keys() -> dict[str, bool]:
     """Read .env (names only, never values) to show what's configured."""
     present: dict[str, str] = {}
@@ -294,8 +309,9 @@ class App:
         self._creep_job = None
         self._placeholders: dict = {}
         self._api_error: tuple[str, str] | None = None
+        self._last_rc: int | None = None
 
-        master.title("Video Production Studio")
+        master.title(_APP_NAME)
         master.geometry("880x860")
         # small min size: the whole UI is scrollable, so it stays usable
         # (nothing hidden) even when the window is shrunk a lot.
@@ -599,7 +615,7 @@ class App:
     def _build_header(self, p) -> None:
         h = ttk.Frame(p, style="App.TFrame")
         h.pack(fill="x")
-        ttk.Label(h, text="Video Production Studio",
+        ttk.Label(h, text=_APP_NAME,
                   style="H1.TLabel").pack(anchor="w")
         ttk.Label(h, style="Muted.TLabel",
                   text="Topic in, finished cinematic video out — script, "
@@ -1019,6 +1035,7 @@ class App:
         self.review_script = None
         self.review_pending = False
         self._api_error = None
+        self._last_rc = None
         self._pct = 0
         self._disp = 0
         self._cancel("_anim_job")
@@ -1103,6 +1120,7 @@ class App:
                 self.q.put(line)
             self.proc.wait()
             rc = self.proc.returncode
+            self._last_rc = rc
             if rc not in (0, None) and _logger:
                 _logger.error("pipeline exited with code %d | cmd: %s",
                               rc, " ".join(argv))
@@ -1145,8 +1163,8 @@ class App:
                 self._set_pct(100, "Finished")
                 self._post_run_meta_fill()
                 final = str(self.video_path) if self.video_path else (
-                    f"{self.out_dir}/final.mp4"
-                    if self.out_dir else "output/<slug>/final.mp4")
+                    f"{self.out_dir}/{self.out_dir.name}.mp4"
+                    if self.out_dir else "output/<slug>/<slug>.mp4")
                 self._append(f"\n✅ Finished — see {final}\n")
                 self.open_btn.pack(side="right", padx=(0, 10))
             else:
@@ -1158,6 +1176,8 @@ class App:
                     self.master.after(
                         100, lambda t=err_type, d=err_detail:
                         self._show_api_error(t, d))
+                elif self._last_rc not in (0, None):
+                    self.master.after(100, self._show_process_error)
 
     _API_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "KEY_NOT_SET": (
@@ -1217,6 +1237,17 @@ class App:
         )
         messagebox.showerror(title, body_tmpl.format(detail=detail))
 
+    def _show_process_error(self) -> None:
+        messagebox.showerror(
+            "Video Production Failed",
+            "Something went wrong and the pipeline stopped.\n\n"
+            "Check the detailed log above for the specific error message.\n\n"
+            "Common causes:\n"
+            "  • A temporary API server error (just try again)\n"
+            "  • Internet connection dropped mid-run\n"
+            "  • A file permission or disk space issue",
+        )
+
     def _post_run_meta_fill(self) -> None:
         if not self.out_dir:
             return
@@ -1242,8 +1273,8 @@ class App:
             self.meta_title.configure(state="disabled")
             self.meta_filename.configure(state="disabled")
 
-        # rename final.mp4 → <safe title>.mp4
-        final = self.out_dir / "final.mp4"
+        # rename <slug>.mp4 → <safe title>.mp4
+        final = self.out_dir / f"{self.out_dir.name}.mp4"
         named = self.out_dir / f"{safe}.mp4"
         if final.exists():
             try:

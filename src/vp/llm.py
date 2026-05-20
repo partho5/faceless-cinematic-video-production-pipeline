@@ -13,21 +13,31 @@ import os
 
 def _collect_gemini_keys() -> list[str]:
     """All usable Gemini keys: GEMINI_API_KEY + GEMINI_API_KEYS comma-list
-    + GEMINI_API_KEY_1…24.  Mirrors voice.collect_keys without importing it."""
+    + GEMINI_API_KEY_1…24.  Mirrors voice.collect_keys without importing it.
+
+    Config loads .env into its own dict, NOT into os.environ, so we must
+    also parse the .env file directly — otherwise keys set only in .env are
+    invisible here.
+    """
+    from .config import ROOT, _parse_env_file
+
+    env: dict[str, str] = {**os.environ}
+    env.update(_parse_env_file(ROOT / ".env"))
+
     seen: set[str] = set()
     out: list[str] = []
 
-    def _add(k: str) -> None:
-        k = k.strip()
-        if k and k not in seen:
-            seen.add(k)
-            out.append(k)
+    def _add(v: str) -> None:
+        v = v.strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
 
-    _add(os.environ.get("GEMINI_API_KEY", ""))
-    for k in os.environ.get("GEMINI_API_KEYS", "").split(","):
+    _add(env.get("GEMINI_API_KEY", ""))
+    for k in env.get("GEMINI_API_KEYS", "").split(","):
         _add(k)
     for i in range(1, 25):
-        _add(os.environ.get(f"GEMINI_API_KEY_{i}", ""))
+        _add(env.get(f"GEMINI_API_KEY_{i}", ""))
     return out
 
 
@@ -45,31 +55,34 @@ def _gemini_text(system: str, user: str) -> str:
     if not keys:
         raise RuntimeError("no Gemini API keys available for fallback")
 
-    model = (
-        os.environ.get("GEMINI_LLM_MODEL", "").strip() or "gemini-2.0-flash"
-    )
+    # Quality cascade: Pro → Flash. Override via GEMINI_LLM_MODEL env var.
+    override = os.environ.get("GEMINI_LLM_MODEL", "").strip()
+    models = [override] if override else ["gemini-2.5-pro", "gemini-2.5-flash"]
+
     last_err: Exception | None = None
-    for key in keys:
-        try:
-            client = genai.Client(api_key=key)
-            resp = client.models.generate_content(
-                model=model,
-                contents=user,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    response_modalities=["TEXT"],
-                ),
-            )
-            # Use explicit part path — resp.text raises in some SDK versions
-            text = resp.candidates[0].content.parts[0].text
-            if not text:
-                raise ValueError("empty response from Gemini")
-            return text
-        except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                last_err = e
-                continue
-            raise
+    for model in models:
+        for key in keys:
+            try:
+                client = genai.Client(api_key=key)
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=user,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        response_modalities=["TEXT"],
+                    ),
+                )
+                text = resp.candidates[0].content.parts[0].text
+                if not text:
+                    raise ValueError("empty response from Gemini")
+                print(f"[vp] Gemini fallback succeeded via {model}", flush=True)
+                return text
+            except Exception as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    last_err = e
+                    continue
+                raise
+        # All keys exhausted for this model — try next model in cascade
     raise RuntimeError(
         f"all Gemini keys rate-limited during Anthropic fallback: {last_err}"
     )

@@ -106,11 +106,12 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
 
     slug = slugify(topic)
     out = OUTPUT / slug
+    video_out = out / f"{slug}.mp4"
     (out / "audio").mkdir(parents=True, exist_ok=True)
     _log(f"output dir: {out}")
 
     from .cost import TRACKER as COST
-    COST.start(title=topic, slug=slug, path=str(out / "final.mp4"))
+    COST.start(title=topic, slug=slug, path=str(video_out))
 
     # 1. Stage 1 + review gate
     _script_path = out / "script.md"
@@ -249,24 +250,24 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     for x in (KenBurns(), CameraMotion(), ColorGrade(), TextRenderer(),
               FilmFX(), FilmAmbience(), CutRhythm()):
         eng.register_xform(x)
-    info = eng.render(doc, aligns, out / "final.mp4", preset=preset,
+    info = eng.render(doc, aligns, video_out, preset=preset,
                       work_dir=out / "_work",
                       audio_track=out / "master.wav")
-    _log(f"render -> final.mp4 {info['resolution']} {info['duration']:.2f}s")
+    _log(f"render -> {video_out.name} {info['resolution']} {info['duration']:.2f}s")
 
     if meta_embed:
-        _embed_mp4_metadata(out / "final.mp4", title=meta_title,
+        _embed_mp4_metadata(video_out, title=meta_title,
                             artist=meta_artist, copyright=meta_copyright,
                             encoder=meta_encoder)
         _log("mp4 metadata: embedded")
 
     # 8. metadata + thumbnail
-    meta = MetadataStage(cfg).run(out / "final.mp4", doc,
+    meta = MetadataStage(cfg).run(video_out, doc,
                                   script_path.read_text(encoding="utf-8"), out)
     _log(f"metadata: thumbnail.jpg + {len(meta['tags'])} tags")
 
     # 9. QA + manifest
-    qa = run_qa(out / "final.mp4", out / "master.wav",
+    qa = run_qa(video_out, out / "master.wav",
                 len(doc.segments), len(aligns))
     _log(f"QA passed={qa['passed']}")
     for c in qa["checks"]:
@@ -275,7 +276,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     # 10. best-effort, non-blocking upload (local copy already saved)
     up = {"status": "disabled"}
     if do_upload:
-        up = yt_upload(out / "final.mp4", meta, cfg)
+        up = yt_upload(video_out, meta, cfg)
         _log(f"upload: {up['status']} ({up.get('reason', up.get('url',''))})")
 
     runtime = {
@@ -309,7 +310,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     cs = COST.save(out, ledger=OUTPUT / "llm_cost_ledger.jsonl")
     _log(f"llm cost: ${cs['total_cost_usd']:.4f} ({cs['llm_calls']} calls) "
          f"-> llm_cost.json | {cs['context']}")
-    _log(f"DONE — deliverable at {out}/final.mp4")
+    _log(f"DONE — deliverable at {video_out}")
     return {"status": "ok", "output": str(out), "qa": qa["passed"],
             "llm_cost_usd": cs["total_cost_usd"]}
 

@@ -131,6 +131,10 @@ class Config:
     def env(self, key: str) -> str:
         return self._env.get(key, "").strip()
 
+    @property
+    def app_name(self) -> str:
+        return self._env.get("APP_NAME", "").strip() or "Video Production Studio"
+
     def _rotation_keys_present(self, m: ModelSpec) -> bool:
         """True if a purpose has usable ROTATION keys beyond its primary env.
 

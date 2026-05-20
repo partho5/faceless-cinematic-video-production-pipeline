@@ -5,9 +5,7 @@ GATE (script is the highest-leverage artifact; gate before TTS/render spend).
 Stage 2: approved script -> per-chapter control JSON, validate-and-repair
 loop (G3), assembled into one canonical document.
 
-Offline (no ANTHROPIC_API_KEY): Stage 1 emits the planning/05 sample script;
-Stage 2 emits the planning/05 sample control document. The pipeline stays
-runnable end-to-end without keys and against the exact build target.
+Missing or failing API keys raise immediately — no silent fallback to sample data.
 """
 from __future__ import annotations
 
@@ -16,7 +14,7 @@ import re
 from pathlib import Path
 
 from ..config import Config
-from ..sample import load_sample_document, sample_script_markdown
+from ..sample import load_sample_document
 from ..schema.model import ControlDocument
 from ..schema.validator import validate
 
@@ -86,21 +84,12 @@ class ScriptStage:
         if path.exists() and (out_dir / "script.APPROVED").exists():
             _log("stage1: reusing approved script (0 API spend)")
             return path
-        if self.spec.offline:
-            _log("stage1: offline -> sample script")
-            script = (f"# {topic}\n\n" + sample_script_markdown())
-        else:
-            words = int(round(max(0.5, float(target_minutes)) * _WPM))
-            _log(f"stage1: writing ~{words}-word script via "
-                 f"{self.spec.model}"
-                 f"{' (with hints)' if hint and hint.strip() else ''} "
-                 f"(one API call, ~10-30s)…")
-            try:
-                script = self._anthropic(topic, target_minutes, hint)
-            except Exception as e:
-                _log(f"stage1: LLM failed ({str(e)[:120]}); "
-                     f"falling back to sample script")
-                script = f"# {topic}\n\n" + sample_script_markdown()
+        words = int(round(max(0.5, float(target_minutes)) * _WPM))
+        _log(f"stage1: writing ~{words}-word script via "
+             f"{self.spec.model}"
+             f"{' (with hints)' if hint and hint.strip() else ''} "
+             f"(one API call, ~10-30s)…")
+        script = self._anthropic(topic, target_minutes, hint)
         path.write_text(script, encoding="utf-8")
         return path
 
@@ -156,16 +145,7 @@ class SegmentStage:
 
     def generate(self, script_path: Path, out_dir: Path,
                  *, max_repair: int = 2, topic: str | None = None) -> ControlDocument:
-        if self.spec.offline:
-            _log("stage2: offline -> sample control document")
-            doc = load_sample_document()
-        else:
-            try:
-                doc = self._generate_live(script_path, out_dir, topic=topic)
-            except Exception as e:
-                _log(f"stage2: live segmentation failed ({e}); "
-                     f"falling back to sample document")
-                doc = load_sample_document()  # robust fallback
+        doc = self._generate_live(script_path, out_dir, topic=topic)
 
         # validate-and-repair loop (styled issues auto-repaired in-place)
         for _ in range(max_repair + 1):
@@ -212,8 +192,10 @@ class SegmentStage:
                 _log(f"stage2: chapter {ci}/{n} [{label}] -> "
                      f"{len(segs)} segment(s)")
                 break
+        if not all_segs:
+            raise RuntimeError("stage2: no segments produced from any chapter")
         d = base.to_dict()
-        d["segments"] = all_segs or d["segments"]
+        d["segments"] = all_segs
         if topic:
             d["video_meta"]["title"] = topic
         return ControlDocument.from_dict(d)

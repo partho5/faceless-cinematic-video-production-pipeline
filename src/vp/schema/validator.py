@@ -120,6 +120,8 @@ def validate(
         _repair_enum(s, "camera_motion", CAMERA_MOTION, r)
         _repair_enum(s, "cut_in_type", CUT_TYPE, r)
         _repair_enum(s, "cut_out_type", CUT_TYPE, r)
+        if not isinstance(s.color_grade_override, str):
+            s.color_grade_override = None
         if s.color_grade_override and s.color_grade_override not in COLOR_GRADE:
             r.warnings.append(
                 f"{s.id}.color_grade_override='{s.color_grade_override}' unknown "
