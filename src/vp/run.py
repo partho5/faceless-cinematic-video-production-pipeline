@@ -266,10 +266,15 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
                             encoder=meta_encoder)
         _log("mp4 metadata: embedded")
 
-    # 8. metadata + thumbnail
-    meta = MetadataStage(cfg).run(video_out, doc,
-                                  script_path.read_text(encoding="utf-8"), out)
-    _log(f"metadata: thumbnail.jpg + {len(meta['tags'])} tags")
+    # 8. metadata + thumbnail. Runs unconditionally so metadata.json is
+    #    always publish-ready (copy/paste into YouTube Studio) even when
+    #    --no-upload is set. Music credit is appended when a track was used.
+    meta = MetadataStage(cfg).run(
+        video_out, doc, script_path.read_text(encoding="utf-8"), out,
+        music_design=md, language=language)
+    _log(f"metadata: thumbnail.jpg + {len(meta['tags'])} tags "
+         f"+ {len(meta.get('hashtags', []))} hashtags "
+         f"(music credit: {'yes' if meta.get('music_credit') else 'no'})")
 
     # 9. QA + manifest
     qa = run_qa(video_out, out / "master.wav",

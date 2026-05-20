@@ -38,16 +38,27 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
             scopes=["https://www.googleapis.com/auth/youtube.upload"],
         )
         yt = build("youtube", "v3", credentials=creds)
+        # Prefer the publish-ready SEO description (chapters + music credit
+        # + disclosure + hashtags assembled by MetadataStage). Fall back to
+        # the raw `description` for older metadata.json files.
+        desc = (metadata.get("description_seo")
+                or metadata.get("description", ""))[:4900]
+        lang = metadata.get("default_language") or "en"
+        snippet = {
+            "title": metadata.get("title", "")[:100],
+            "description": desc,
+            "tags": metadata.get("tags", [])[:30],
+            "categoryId": metadata.get("category_id", "27"),
+            "defaultLanguage": lang,
+            "defaultAudioLanguage": (
+                metadata.get("default_audio_language") or lang),
+        }
         body = {
-            "snippet": {
-                "title": metadata.get("title", "")[:100],
-                "description": metadata.get("description", "")[:4900],
-                "tags": metadata.get("tags", [])[:30],
-                "categoryId": "27",  # Education
-            },
+            "snippet": snippet,
             "status": {
                 "privacyStatus": FORCED_PRIVACY,
-                "selfDeclaredMadeForKids": False,
+                "selfDeclaredMadeForKids": bool(
+                    metadata.get("made_for_kids", False)),
                 # synthetic/altered-media disclosure (G11); harmless if the
                 # account/API rev ignores the hint.
                 "containsSyntheticMedia": True,
