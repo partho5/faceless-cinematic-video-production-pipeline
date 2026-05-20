@@ -111,9 +111,13 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
     )
     try:
         return _gemini_text(system, user)
-    except Exception:
-        # Both providers failed — print the specific sentinel so the GUI
-        # shows the right user-friendly dialog, then re-raise original error.
+    except Exception as gemini_exc:
+        # Both providers failed — log Gemini's reason so the user can see it,
+        # then print the specific sentinel for the GUI dialog.
+        print(
+            f"[vp] warn: Gemini fallback also failed ({str(gemini_exc)[:120]})",
+            flush=True,
+        )
         _err = str(anthropic_exc)
         _err_lower = _err.lower()
         if isinstance(anthropic_exc, anthropic.AuthenticationError):
