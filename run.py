@@ -33,6 +33,7 @@ SRC = ROOT / "src"
 ENV_FILE = ROOT / ".env"
 RESUME_FILE = ROOT / ".resume_state.json"
 METADATA_PROFILE = ROOT / ".metadata_profile.json"
+RENDER_PROFILE = ROOT / ".render_profile.json"
 SAMPLE_SEGMENTS = "6"  # "short sample" cap
 _LOG_FILE = ROOT / "run.log"
 
@@ -290,6 +291,21 @@ def _save_meta_profile(data: dict) -> None:
     try:
         METADATA_PROFILE.write_text(json.dumps(data, ensure_ascii=False,
                                                 indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_render_profile() -> dict:
+    try:
+        return json.loads(RENDER_PROFILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_render_profile(data: dict) -> None:
+    try:
+        RENDER_PROFILE.write_text(json.dumps(data, ensure_ascii=False,
+                                              indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -703,7 +719,23 @@ class App:
                         ).grid(row=4, column=0, columnspan=3, sticky="w",
                                pady=1)
         o.columnconfigure(2, weight=1)
+        self._build_render_section(p)
         self._build_metadata_section(p)
+
+    def _build_render_section(self, p) -> None:
+        r = self._card(p, "Rendering Settings")
+
+        self.add_music = tk.BooleanVar(
+            value=_load_render_profile().get("add_music", True))
+        ttk.Checkbutton(r, variable=self.add_music,
+                        style="Switch.TCheckbutton",
+                        text="Add background music").grid(
+            row=0, column=0, sticky="w", pady=(0, 2))
+        ttk.Label(r,
+                  text="uncheck to render voice-only (skips music stage)",
+                  style="MutedOn.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(0, 2))
+        r.columnconfigure(0, weight=1)
 
     def _build_voice_section(self, p) -> None:
         v = self._card(p, "Voice")
@@ -1015,6 +1047,8 @@ class App:
             argv.append("--no-upload")
         if self.sample.get():
             argv += ["--segments", SAMPLE_SEGMENTS]
+        if not self.add_music.get():
+            argv.append("--no-music")
         if self._resuming:
             argv.append("--resume")
         voice = self.voice_var.get().strip()
@@ -1041,6 +1075,9 @@ class App:
             "author": self._ph_val(self.meta_author),
             "copyright": self._ph_val(self.meta_copyright),
             "encoder": self._ph_val(self.meta_encoder),
+        })
+        _save_render_profile({
+            "add_music": self.add_music.get(),
         })
         argv = self._argv()
         if not argv:

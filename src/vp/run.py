@@ -92,6 +92,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         tts_scene: str | None = None, tts_context: str | None = None,
         target_minutes: float = 6.0, hint: str | None = None,
         resume: bool = False,
+        add_music: bool = True,
         meta_embed: bool = False,
         meta_title: str | None = None,
         meta_artist: str | None = None,
@@ -159,28 +160,32 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     #     the closed catalog based on niche/tone. Runs before TTS so a failure
     #     is learned before burning voice API credits. Checkpointed to
     #     music.json so --resume skips the API call on re-runs.
-    from .pipeline.music_design import MusicDesigner
-
-    _music_json = out / "music.json"
     md: dict | None = None
-    if resume and _music_json.exists():
-        try:
-            cached = json.loads(_music_json.read_text(encoding="utf-8"))
-            doc.video_meta.update(cached["meta_patch"])
-            md = cached
-            _log(f"resume: music_design skipped "
-                 f"(track={cached.get('track') or 'none'})")
-        except Exception:
-            md = None
-    if md is None:
-        md = MusicDesigner(cfg).design(doc)
-        _music_json.write_text(
-            json.dumps(md, ensure_ascii=False, indent=2), encoding="utf-8")
-        doc.video_meta.update(md["meta_patch"])
-    _log(f"music: {md.get('track') or 'none'} "
-         f"[{md.get('presence', '?')}] "
-         f"(model={md.get('model')}"
-         f"{', offline' if md.get('offline') else ''})")
+    if add_music:
+        from .pipeline.music_design import MusicDesigner
+
+        _music_json = out / "music.json"
+        if resume and _music_json.exists():
+            try:
+                cached = json.loads(_music_json.read_text(encoding="utf-8"))
+                doc.video_meta.update(cached["meta_patch"])
+                md = cached
+                _log(f"resume: music_design skipped "
+                     f"(track={cached.get('track') or 'none'})")
+            except Exception:
+                md = None
+        if md is None:
+            md = MusicDesigner(cfg).design(doc)
+            _music_json.write_text(
+                json.dumps(md, ensure_ascii=False, indent=2), encoding="utf-8")
+            doc.video_meta.update(md["meta_patch"])
+        _log(f"music: {md.get('track') or 'none'} "
+             f"[{md.get('presence', '?')}] "
+             f"(model={md.get('model')}"
+             f"{', offline' if md.get('offline') else ''})")
+    else:
+        # voice-only render: master.py treats a missing track slug as silence
+        _log("music: skipped (--no-music)")
 
     # 3. VOICE (continuous per-chapter read, sliced per segment) -> align
     from .pipeline.voice import VoiceStage
@@ -293,11 +298,11 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
             "cues": sd["cues"],
         },
         "music_design": {
-            "track":    md.get("track"),
-            "presence": md.get("presence"),
-            "reason":   md.get("reason"),
-            "offline":  md.get("offline"),
-            "model":    md.get("model"),
+            "track":    md.get("track")    if md else None,
+            "presence": md.get("presence") if md else None,
+            "reason":   md.get("reason")   if md else "skipped (--no-music)",
+            "offline":  md.get("offline")  if md else None,
+            "model":    md.get("model")    if md else None,
         },
         # true if ANY stage fell back to a stub (drives the cost note, G14)
         "any_stub": vr.offline
@@ -336,6 +341,8 @@ def main(argv=None) -> int:
     ap.add_argument("--resume", action="store_true",
                     help="reuse existing script.md / video.json artifacts "
                          "to skip completed API stages")
+    ap.add_argument("--no-music", action="store_true",
+                    help="skip background music selection — render voice-only")
     ap.add_argument("--meta-embed", action="store_true",
                     help="embed MP4 metadata tags into the final video")
     ap.add_argument("--meta-title",     default=None)
@@ -356,6 +363,7 @@ def main(argv=None) -> int:
             segments=a.segments, do_upload=not a.no_upload,
             tts_scene=a.tts_scene, tts_context=a.tts_context,
             target_minutes=a.minutes, hint=a.hint, resume=a.resume,
+            add_music=not a.no_music,
             meta_embed=a.meta_embed, meta_title=a.meta_title,
             meta_artist=a.meta_author, meta_copyright=a.meta_copyright,
             meta_encoder=a.meta_encoder,
