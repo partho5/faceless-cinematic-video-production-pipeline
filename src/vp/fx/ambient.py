@@ -113,7 +113,7 @@ _SCAN_GRADES = {"surveillance"}
 
 def _grade(seg, ctx) -> str:
     return seg.color_grade_override or ctx.doc.video_meta.get(
-        "base_color_grade", "cold_isolation"
+        "base_color_grade", "clinical"
     )
 
 

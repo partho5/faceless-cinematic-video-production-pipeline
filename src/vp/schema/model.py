@@ -98,8 +98,8 @@ class Chapter:
     chapter_id: str
     start: float
     end: float
-    intensity_curve: str
-    segment_count: int
+    intensity_curve: str = ""
+    segment_count: int = 0
 
 
 @dataclass

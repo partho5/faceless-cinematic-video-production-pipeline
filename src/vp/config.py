@@ -135,6 +135,44 @@ class Config:
     def app_name(self) -> str:
         return self._env.get("APP_NAME", "").strip() or "Video Production Studio"
 
+    @property
+    def branding_thumbnail(self) -> dict[str, Any]:
+        """User-editable channel brand voice for thumbnail prompts.
+
+        Read by the metadata stage to enforce a consistent accent palette
+        and style across every video regardless of topic. Missing keys
+        fall back to NICHE-NEUTRAL defaults so a stripped config produces
+        a usable prompt without steering output toward any one genre —
+        operators with a single-genre channel set their own values in
+        `config.yaml -> branding.thumbnail`.
+        """
+        cfg = ((self._raw.get("branding") or {}).get("thumbnail") or {})
+        return {
+            "accent_colors": cfg.get("accent_colors")
+                or ["#FFFFFF", "#111111"],
+            "theme": cfg.get("theme") or "cinematic editorial",
+            "mood": cfg.get("mood") or "engaging, intentional, clean",
+            "lighting": cfg.get("lighting")
+                or "balanced cinematic lighting, intentional contrast",
+            "style": cfg.get("style")
+                or "photoreal, 35mm, shallow depth of field, cinematic film grain",
+            "negative": cfg.get("negative")
+                or "no text, no captions, no lettering, no logos, no watermarks, no busy backgrounds, no collage, no multiple subjects",
+        }
+
+    @property
+    def channel_base_color_grade(self) -> str:
+        """Channel-default color grade applied to every video at render.
+
+        Read by Stage 2 when assembling `video_meta.base_color_grade`. Must
+        be one of schema.enums.COLOR_GRADE. Per-segment overrides are still
+        honored. Niche-neutral fallback is `"clinical"` (a flat, even look)
+        — operators with a single-genre channel set this explicitly in
+        `config.yaml -> channel.base_color_grade`.
+        """
+        cfg = self._raw.get("channel") or {}
+        return cfg.get("base_color_grade") or "clinical"
+
     def _rotation_keys_present(self, m: ModelSpec) -> bool:
         """True if a purpose has usable ROTATION keys beyond its primary env.
 
@@ -167,7 +205,6 @@ class Config:
         "script_generation",
         "segmentation_direction",
         "metadata_text",
-        "thumbnail_image",
         "tts_audio",
         "forced_alignment",
     )

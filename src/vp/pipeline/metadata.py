@@ -1,10 +1,13 @@
 """Metadata stage (G2) — the biggest revenue lever.
 
-- Thumbnail 1280x720: pick the most visually interesting source frame
-  (frame_compose mode, planning/10) + a punchy Pillow text overlay.
 - SEO-optimized title variants / description / tags / hashtags / keywords /
   chapters via the `metadata_text` model (lazy Anthropic), with a
   deterministic offline fallback.
+- `thumbnail_prompt`: a copy/paste-ready prompt for Gemini's free web UI
+  ("nano banana" / gemini-2.5-flash-image). Brand voice (accent colors,
+  mood, lighting, style) comes from `branding.thumbnail` in config.yaml
+  and is enforced on every video regardless of topic so the channel
+  reads as one channel.
 - Composes a publish-ready description (hook → body → chapters → music
   credit → disclosure → hashtags) so metadata.json is copy-paste-ready
   for YouTube Studio whether or not auto-upload is enabled.
@@ -15,14 +18,9 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 
-import numpy as np
-from PIL import Image, ImageDraw
-
 from ..config import ASSETS, Config
-from ..fx.fonts import load_font
 from ..schema.model import ControlDocument
 
 _STOP = set("the a an of to is are be in on for you your they them it that this "
@@ -56,54 +54,6 @@ def _load_music_attribution(music_design: dict | None) -> str | None:
     return None
 
 
-def _best_frame(video: Path, n: int = 12) -> Image.Image:
-    """Sample n frames; keep the one with the most luminance variance."""
-    dur = float(subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "csv=p=0", str(video)], capture_output=True, text=True
-    ).stdout.strip() or 6.0)
-    best, best_score = None, -1.0
-    tmp = video.parent / "_thumb_src.png"
-    for i in range(1, n + 1):
-        t = dur * i / (n + 1)
-        subprocess.run(["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", str(video),
-                        "-vframes", "1", str(tmp)], capture_output=True)
-        if not tmp.exists():
-            continue
-        im = Image.open(tmp).convert("RGB")
-        score = float(np.asarray(im.convert("L")).std())
-        if score > best_score:
-            best, best_score = im.copy(), score
-    tmp.unlink(missing_ok=True)
-    return best or Image.new("RGB", (1280, 720), (20, 20, 28))
-
-
-def _overlay_words(title: str) -> str:
-    words = [w for w in re.findall(r"[A-Za-z0-9]+", title) if w.lower() not in _STOP]
-    return " ".join(words[:3]).upper() if words else "WATCH THIS"
-
-
-def compose_thumbnail(frame: Image.Image, title: str, out: Path) -> Path:
-    im = frame.resize((1280, 720), Image.LANCZOS).convert("RGB")
-    # cinematic darken + bottom gradient for text legibility
-    arr = (np.asarray(im).astype(np.float32) * 0.72)
-    grad = np.linspace(1.0, 0.35, 720, dtype=np.float32)[:, None, None]
-    arr *= grad
-    im = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-    d = ImageDraw.Draw(im)
-    text = _overlay_words(title)
-    font = load_font("aggressive", None, 132)
-    bbox = d.textbbox((0, 0), text, font=font, stroke_width=6)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    x, y = (1280 - tw) // 2, 720 - th - 90
-    d.rectangle([0, y - 30, 1280, y + th + 40], fill=(0, 0, 0))
-    d.text((x, y), text, font=font, fill=(232, 69, 69),
-           stroke_width=6, stroke_fill=(0, 0, 0))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    im.save(out, "JPEG", quality=90)
-    return out
-
-
 def _chapters_timestamps(doc: ControlDocument) -> list[str]:
     out = []
     for c in sorted(doc.chapters, key=lambda c: c.start):
@@ -113,12 +63,59 @@ def _chapters_timestamps(doc: ControlDocument) -> list[str]:
     return out
 
 
-_SEO_SYSTEM = """You write SEO-optimized YouTube metadata for a faceless \
-dark-psychology / human-behavior channel. Return ONLY valid JSON, no prose.
+def _branding_block(b: dict) -> str:
+    """Render the user-tunable brand voice as a numbered rules block.
+
+    Pasted into the LLM system prompt so every generated thumbnail prompt
+    inherits the channel look. Also rendered into the deterministic
+    offline fallback for parity.
+    """
+    accents = b.get("accent_colors") or []
+    primary = accents[0] if accents else "#E84545"
+    background = accents[1] if len(accents) > 1 else "#0F0F1A"
+    return (
+        f"  - Theme: {b['theme']}\n"
+        f"  - Mood: {b['mood']}\n"
+        f"  - Lighting: {b['lighting']}\n"
+        f"  - Style: {b['style']}\n"
+        f"  - Color palette: dominant background tone {background}; "
+        f"single accent {primary} for the focal pop; no other vivid colors\n"
+        f"  - Hard exclusions: {b['negative']}"
+    )
+
+
+_THUMB_RULES = """Thumbnail prompt rules (these are NON-NEGOTIABLE and apply \
+to every video regardless of topic):
+  1. ONE focal subject. A single iconic visual metaphor for the video's \
+core idea. No collage, no multiple objects, no crowd, no split-screen.
+  2. Lots of negative space. Rule-of-thirds. Depth. The eye lands on the \
+subject in under one second at thumbnail size.
+  3. NO text, lettering, captions, logos, watermarks, numbers, or symbols \
+anywhere in the image. Title overlay is added separately later.
+  4. Eye-catching via composition and light, not via clutter or saturation. \
+High contrast against the dominant background tone.
+  5. Premium / cinematic feel. Never a default-AI sheen; specify lens, \
+grain, lighting direction.
+  6. The prompt must be ONE paragraph, 60–120 words, written as a direct \
+image-generation instruction (no preamble like "create a thumbnail that..."). \
+End with the negative-prompt clause spelled out.
+
+Brand voice to enforce on EVERY prompt:
+{branding_block}"""
+
+
+def _build_seo_system(branding: dict) -> str:
+    """System prompt for `metadata_text`. Branding is interpolated so the
+    LLM produces a `thumbnail_prompt` that already obeys the channel look.
+    """
+    return f"""You write SEO-optimized YouTube metadata. Return ONLY valid \
+JSON, no prose. Every field must reflect THIS video's actual topic — do not \
+default to any single niche, tone, or vocabulary.
 
 Required keys:
   title_variants : array of 3 titles. Each ≤ 100 chars, hook-driven, \
-curiosity-gap. Avoid clickbait punctuation like "!!!" or ALL CAPS words.
+curiosity-gap, faithful to the script's subject. Avoid clickbait \
+punctuation like "!!!" or ALL CAPS words.
   description_body : 1200–1800 chars. Structure: (1) a 1–2 line hook \
 that reuses the strongest title keywords; (2) a 4–6 line value-prop \
 paragraph naturally weaving in 4–6 long-tail keywords from the script; \
@@ -126,20 +123,53 @@ paragraph naturally weaving in 4–6 long-tail keywords from the script; \
 (4) a 1-line CTA inviting like + subscribe + comment. Do NOT include \
 chapter timestamps, music credits, hashtags, or the disclosure line — \
 those are appended by the caller. Plain text only, no markdown.
-  tags : array of 20–30 strings. Mix of broad (e.g. "psychology", \
-"human behavior") and long-tail (e.g. "signs of covert manipulation"). \
-Each tag ≤ 60 chars. No "#" prefix.
+  tags : array of 20–30 strings drawn from the script's actual subject \
+matter. Mix broad (single-word, topic-defining) and long-tail (multi-word, \
+search-intent phrases a viewer would type). Each tag ≤ 60 chars. No "#" \
+prefix. Do not invent tags that don't match the video.
   hashtags : array of 3–5 short hashtags WITHOUT spaces, lowercase, \
-include leading "#" (e.g. "#darkpsychology"). YouTube shows the first \
-3 above the title.
-  keywords : array of 10–20 short keyword phrases used for the video \
-keywords meta field. Lowercase, no "#"."""
+include leading "#". Pick hashtags that match THIS video's topic — not \
+generic channel hashtags. YouTube shows the first 3 above the title.
+  keywords : array of 10–20 short keyword phrases for the video keywords \
+meta field. Lowercase, no "#". Topic-relevant only.
+  thumbnail_prompt : a SINGLE paragraph (60–120 words) to paste into \
+Gemini's free web UI (nano banana / gemini-2.5-flash-image) to generate \
+the YouTube thumbnail. Customize the focal subject to this video, then \
+enforce the rules below verbatim.
+
+{_THUMB_RULES.format(branding_block=_branding_block(branding))}"""
+
+
+def _offline_thumbnail_prompt(title: str, branding: dict) -> str:
+    """Deterministic fallback used when the LLM call is offline/fails.
+
+    Topic-agnostic: only the title threads through; everything else is
+    the channel brand voice. Worse than the live path, far better than
+    the dead Pillow stamp it replaces.
+    """
+    accents = branding.get("accent_colors") or []
+    primary = accents[0] if accents else "#E84545"
+    background = accents[1] if len(accents) > 1 else "#0F0F1A"
+    subject = title.strip().rstrip(".") or "the hidden human pattern"
+    return (
+        f"A 16:9 cinematic YouTube thumbnail visualising one iconic "
+        f"metaphor for: \"{subject}\". A single focal subject anchored on "
+        f"a rule-of-thirds intersection, surrounded by deep negative space. "
+        f"{branding['style']}. {branding['lighting']}. Mood: "
+        f"{branding['mood']}. Visual genre: {branding['theme']}. "
+        f"Dominant background tone {background}; one restrained accent of "
+        f"{primary} catching the rim of the subject — no other saturated "
+        f"colors. Composition reads instantly at small sizes; premium, "
+        f"film-still quality, never default-AI gloss. Negative prompt: "
+        f"{branding['negative']}."
+    )
 
 
 class MetadataStage:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.spec = cfg.model("metadata_text")
+        self.branding = cfg.branding_thumbnail
 
     def _text_offline(self, title: str, script: str) -> dict:
         base = title.rstrip(".")
@@ -174,6 +204,7 @@ class MetadataStage:
             "tags": tags,
             "hashtags": hashtags,
             "keywords": keywords,
+            "thumbnail_prompt": _offline_thumbnail_prompt(title, self.branding),
         }
 
     def _text_live(self, title: str, script: str) -> dict:
@@ -181,7 +212,7 @@ class MetadataStage:
 
         raw = anthropic_message(
             self.spec,
-            system=_SEO_SYSTEM,
+            system=_build_seo_system(self.branding),
             user=f"Title: {title}\nScript:\n{script[:4000]}",
         )
         data = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
@@ -189,7 +220,7 @@ class MetadataStage:
         # from the offline path rather than failing the whole metadata stage.
         offline = self._text_offline(title, script)
         for k in ("title_variants", "description_body", "tags",
-                  "hashtags", "keywords"):
+                  "hashtags", "keywords", "thumbnail_prompt"):
             if not data.get(k):
                 data[k] = offline[k]
         return data
@@ -225,8 +256,6 @@ class MetadataStage:
             music_design: dict | None = None,
             language: str | None = None) -> dict:
         title = doc.video_meta.get("title", "Untitled")
-        thumb = compose_thumbnail(_best_frame(video_path), title,
-                                  out_dir / "thumbnail.jpg")
         if self.spec.offline:
             text = self._text_offline(title, script)
         else:
@@ -253,7 +282,8 @@ class MetadataStage:
             "hashtags": text["hashtags"],
             "keywords": text["keywords"],
             "chapters": _chapters_timestamps(doc),
-            "thumbnail": str(thumb),
+            "thumbnail_prompt": text["thumbnail_prompt"],
+            "thumbnail_branding": self.branding,
             "music_credit": music_credit,
             "synthetic_media_disclosure": True,   # G11 / YouTube altered-content
             "category": "Education",

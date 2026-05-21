@@ -1,9 +1,10 @@
 """YouTube Data API v3 upload (planning/02 #13, G15).
 
 CONTRACT: this step is best-effort and NON-BLOCKING. The render already
-wrote final.mp4 + thumbnail + metadata locally and the run succeeds on that
-alone. This function NEVER raises and NEVER deletes the local copy — it
-returns a status dict that the manifest records.
+wrote final.mp4 + metadata locally (thumbnail is produced manually by
+pasting `metadata.json::thumbnail_prompt` into Gemini's web UI) and the
+run succeeds on that alone. This function NEVER raises and NEVER deletes
+the local copy — it returns a status dict that the manifest records.
 
 OAuth 2.0 (not an API key). Until the OAuth app passes Google verification,
 every API upload is forced `privacyStatus=private` (G15) regardless of
@@ -70,14 +71,9 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
         )
         resp = req.execute()
         vid = resp.get("id")
-        thumb = metadata.get("thumbnail")
-        if vid and thumb and Path(thumb).exists():
-            try:
-                yt.thumbnails().set(
-                    videoId=vid, media_body=MediaFileUpload(str(thumb))
-                ).execute()
-            except Exception:
-                pass
+        # Thumbnail upload intentionally skipped: thumbnails are now produced
+        # manually from `metadata.json::thumbnail_prompt` via Gemini's web UI,
+        # so there is no local image file to push. Set it in YouTube Studio.
         return {"status": "uploaded", "video_id": vid,
                 "privacy": FORCED_PRIVACY,
                 "url": f"https://youtu.be/{vid}" if vid else None}

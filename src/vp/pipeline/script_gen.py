@@ -14,9 +14,61 @@ import re
 from pathlib import Path
 
 from ..config import Config
-from ..sample import load_sample_document
 from ..schema.model import ControlDocument
 from ..schema.validator import validate
+
+
+# Channel-wide defaults baked in at Stage 2. These USED to be inherited
+# from planning/05-sample-case.md via load_sample_document(), which leaked
+# the sample's relationship-manipulation chapters and topic-specific
+# metadata into every shipped video. Defining them here decouples the
+# production pipeline from the sample fixture (which now exists only for
+# tests).
+#
+# Only neutral look-numbers and mix defaults live here. The mood-coded
+# `base_color_grade` is read from `config.yaml -> channel.base_color_grade`
+# so the channel's visual identity is a config knob, not a code constant.
+# `master.py` reads the volume fields; `MusicDesigner` overwrites
+# `background_music_track` + `music_master_volume` per-video when
+# --add-music is enabled.
+_CHANNEL_VIDEO_META: dict = {
+    "base_grain": 0.22,
+    "base_vignette": 0.35,
+    "base_chromatic_aberration": 0.05,
+    "music_master_volume": 0.18,
+    "voice_master_volume": 1.0,
+    "music_duck_amount": 0.7,
+}
+
+# global_assets pointer table: maps style names -> filenames under assets/.
+# Channel-wide; not per-video. Fonts live in assets/fonts/, LUTs in assets/luts/.
+_CHANNEL_GLOBAL_ASSETS: dict = {
+    "fonts": {
+        "aggressive": "Anton-Regular.ttf",
+        "clinical": "Inter-Bold.ttf",
+        "whisper": "Cormorant-Italic.ttf",
+        "reveal": "PlayfairDisplay-Bold.ttf",
+        "handwritten": "Caveat-Bold.ttf",
+    },
+    # Pointer table for every grade in schema.enums.COLOR_GRADE. If the
+    # .cube file isn't present in assets/luts/ the FX layer synthesises one;
+    # the table just keeps the validator from warning per-segment.
+    "luts": {
+        "cold_isolation":    "luts/cold_isolation.cube",
+        "warm_comfort":      "luts/warm_comfort.cube",
+        "warm_comfort_dark": "luts/warm_comfort_dark.cube",
+        "clinical":          "luts/clinical.cube",
+        "surveillance":      "luts/surveillance.cube",
+        "memory":            "luts/memory.cube",
+        "threat":            "luts/threat.cube",
+        "madness":           "luts/madness.cube",
+        "revelation":        "luts/revelation.cube",
+        "death":             "luts/death.cube",
+        "dream":             "luts/dream.cube",
+        "interrogation":     "luts/interrogation.cube",
+        "nostalgia":         "luts/nostalgia.cube",
+    },
+}
 
 
 def _log(msg: str) -> None:
@@ -31,10 +83,19 @@ def slugify(text: str) -> str:
 
 # ----------------------------------------------------------------- Stage 1 --
 _SCRIPT_SYS_BASE = (
-    "You are a scriptwriter for a dark-psychology YouTube channel. Voice: "
-    "low, controlled, second-person, knowledge-gap hooks, retention beats. "
-    "Write narration ONLY (no stage directions). Mark chapters as "
-    "'**[HOOK · m:ss–m:ss]**', '**[SIGN N · ...]**', '**[CLOSING · ...]**'."
+    "You are a scriptwriter for a YouTube channel. Write narration ONLY "
+    "(no stage directions, no camera notes). Use proven retention craft: "
+    "a strong cold-open hook, knowledge-gap turns, beats that earn the next "
+    "sentence, and an ending that lands. "
+    "Match voice, register, and intensity to the TOPIC — calm and warm for "
+    "a bedtime story, precise and grounded for a how-to, lively for a "
+    "review, controlled and dramatic for a thriller breakdown. Do not "
+    "default to any single tone. "
+    "Mark each chapter on its own line as '**[<SHORT_LABEL> · m:ss–m:ss]**' "
+    "where the label is a topic-appropriate name (HOOK / INTRO / STEP 1 / "
+    "PART 2 / SECTION / MAIN POINT / SIGN N / CLOSING — pick whatever fits "
+    "the topic). The first chapter must be HOOK and the last must be "
+    "CLOSING; everything between is yours to name."
 )
 
 _WPM = 150  # calm spoken pace; words ≈ minutes × WPM
@@ -106,6 +167,80 @@ def split_chapters(script_md: str) -> list[tuple[str, str]]:
     return out
 
 
+_CH_LABEL_RX = re.compile(
+    r"^(?P<name>.+?)\s*[·•|-]\s*"
+    r"(?P<start>\d+:\d{2}(?::\d{2})?)\s*[-–—]\s*"
+    r"(?P<end>\d+:\d{2}(?::\d{2})?)\s*$"
+)
+
+
+def _hms_to_s(t: str) -> float:
+    """'m:ss' or 'h:mm:ss' -> seconds."""
+    out = 0.0
+    for p in t.split(":"):
+        out = out * 60 + float(p)
+    return out
+
+
+def _chapter_slug(name: str) -> str:
+    """'SIGN 1 Love Bombing' -> 'sign_1_love_bombing'."""
+    s = re.sub(r"[^\w\s]", "", name.lower()).strip()
+    return re.sub(r"\s+", "_", s) or "chapter"
+
+
+def _parse_chapter_specs(chapters_parsed: list[tuple[str, str]]) -> list[dict]:
+    """Derive validated Chapter dicts from the script's `**[NAME · m:ss–m:ss]**` markers.
+
+    Returns dicts shaped for ControlDocument.from_dict: chapter_id, start,
+    end, intensity_curve, segment_count. Guarantees a contiguous timeline
+    starting at 0 (validator requirement). If any label is missing or
+    unparseable, falls back to an even distribution.
+    """
+    specs: list[dict] = []
+    parse_failed = False
+    for label, _ in chapters_parsed:
+        m = _CH_LABEL_RX.match(label)
+        if not m:
+            parse_failed = True
+            break
+        name = m.group("name").strip()
+        specs.append({
+            "chapter_id": _chapter_slug(name),
+            "start": _hms_to_s(m.group("start")),
+            "end": _hms_to_s(m.group("end")),
+            "intensity_curve": "",
+            "segment_count": 0,
+        })
+
+    if parse_failed or not specs:
+        # script didn't carry timestamps in the labels — distribute evenly
+        # over a placeholder 60s-per-chapter timeline. G1 reflow overwrites
+        # with real audio timing anyway; this just keeps the validator happy.
+        slot = 60.0
+        specs = [{
+            "chapter_id": _chapter_slug(label),
+            "start": i * slot,
+            "end": (i + 1) * slot,
+            "intensity_curve": "",
+            "segment_count": 0,
+        } for i, (label, _) in enumerate(chapters_parsed)]
+        return specs
+
+    # Normalize to a contiguous timeline starting at 0 (validator: chapters
+    # must abut, first chapter must start at 0).
+    offset = specs[0]["start"]
+    if offset != 0:
+        for s in specs:
+            s["start"] -= offset
+            s["end"] -= offset
+    for i in range(1, len(specs)):
+        if specs[i]["start"] != specs[i - 1]["end"]:
+            specs[i]["start"] = specs[i - 1]["end"]
+        if specs[i]["end"] <= specs[i]["start"]:
+            specs[i]["end"] = specs[i]["start"] + 1.0
+    return specs
+
+
 # ----------------------------------------------------------------- Stage 2 --
 _SEG_SYS = (
     "You are a video director. Split the chapter into 2-4s beats at clause "
@@ -127,7 +262,8 @@ _SEG_SYS = (
 )
 
 
-def _repair_zero_timestamps(all_segs: list[dict], n_chapters: int, base) -> None:
+def _repair_zero_timestamps(all_segs: list[dict], n_chapters: int,
+                            total_duration: float) -> None:
     """Evenly distribute timestamps for any chapter where the LLM emitted all zeros.
 
     Gemini occasionally emits start=0/end=0 for all segments in a chapter.
@@ -135,7 +271,7 @@ def _repair_zero_timestamps(all_segs: list[dict], n_chapters: int, base) -> None
     but the validator requires end > start. Assigns synthetic slots so the
     pipeline is not blocked.
     """
-    total = float((base.video_meta or {}).get("total_duration_seconds", 0) or 0)
+    total = float(total_duration or 0)
     slot = (total / n_chapters) if (total > 0 and n_chapters > 0) else 60.0
     for ci in range(1, n_chapters + 1):
         prefix = f"c{ci}_"
@@ -193,15 +329,18 @@ class SegmentStage:
 
     def _generate_live(self, script_path: Path, out_dir: Path,
                        *, topic: str | None = None) -> ControlDocument:
-        base = load_sample_document()  # reuse meta/chapters/global_assets shell
-        chapters = split_chapters(script_path.read_text(encoding="utf-8"))
-        n = len(chapters)
+        chapters_parsed = split_chapters(script_path.read_text(encoding="utf-8"))
+        n = len(chapters_parsed)
+        if n == 0:
+            raise RuntimeError("stage2: script has no '**[...]**' chapter markers")
+        chapter_specs = _parse_chapter_specs(chapters_parsed)
+        total_duration = chapter_specs[-1]["end"]
         _log(f"stage2: segmenting {n} chapter(s) via LLM "
              f"(one API call each)…")
         ch_cache = out_dir / "_seg_chapters"
         ch_cache.mkdir(parents=True, exist_ok=True)
         all_segs: list[dict] = []
-        for ci, (label, text) in enumerate(chapters, 1):
+        for ci, (label, text) in enumerate(chapters_parsed, 1):
             cache_file = ch_cache / f"{ci}.json"
             if cache_file.exists():
                 try:
@@ -229,11 +368,26 @@ class SegmentStage:
                 break
         if not all_segs:
             raise RuntimeError("stage2: no segments produced from any chapter")
-        _repair_zero_timestamps(all_segs, len(chapters), base)
-        d = base.to_dict()
-        d["segments"] = all_segs
-        if topic:
-            d["video_meta"]["title"] = topic
+        _repair_zero_timestamps(all_segs, n, total_duration)
+
+        # back-fill segment_count from what the LLM actually produced per
+        # chapter (so the doc reflects reality, not the script's plan).
+        for ci, spec in enumerate(chapter_specs, 1):
+            prefix = f"c{ci}_"
+            spec["segment_count"] = sum(
+                1 for s in all_segs if (s.get("id") or "").startswith(prefix))
+
+        d = {
+            "video_meta": {
+                **_CHANNEL_VIDEO_META,
+                "base_color_grade": self.cfg.channel_base_color_grade,
+                "title": topic or "Untitled",
+                "total_duration_seconds": total_duration,
+            },
+            "chapters": chapter_specs,
+            "global_assets": dict(_CHANNEL_GLOBAL_ASSETS),
+            "segments": all_segs,
+        }
         return ControlDocument.from_dict(d)
 
 

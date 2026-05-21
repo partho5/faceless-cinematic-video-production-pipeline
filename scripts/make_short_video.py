@@ -94,7 +94,8 @@ def main():
                             next(iter(aligns.values())).method,
                             "any_stub": vr.offline})
     log(f"QA passed={qa['passed']} ({[c['check'] for c in qa['checks'] if not c['pass']] or 'all ok'})")
-    log(f"DONE -> {out/'final.mp4'}  thumb={out/'thumbnail.jpg'}")
+    log(f"DONE -> {out/'final.mp4'}  metadata={out/'metadata.json'} "
+        f"(paste thumbnail_prompt into Gemini web UI for the thumbnail)")
     return 0
 
 

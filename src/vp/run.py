@@ -272,8 +272,9 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     meta = MetadataStage(cfg).run(
         video_out, doc, script_path.read_text(encoding="utf-8"), out,
         music_design=md, language=language)
-    _log(f"metadata: thumbnail.jpg + {len(meta['tags'])} tags "
+    _log(f"metadata: {len(meta['tags'])} tags "
          f"+ {len(meta.get('hashtags', []))} hashtags "
+         f"+ thumbnail_prompt ({len(meta.get('thumbnail_prompt', ''))} chars) "
          f"(music credit: {'yes' if meta.get('music_credit') else 'no'})")
 
     # 9. QA + manifest

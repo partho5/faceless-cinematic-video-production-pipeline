@@ -62,7 +62,7 @@ class RenderContext:
 
 
 def _grade_color(seg: Segment, doc: ControlDocument) -> tuple[int, int, int]:
-    g = seg.color_grade_override or doc.video_meta.get("base_color_grade", "cold_isolation")
+    g = seg.color_grade_override or doc.video_meta.get("base_color_grade", "clinical")
     return _GRADE_RGB.get(g, (30, 30, 36))
 
 

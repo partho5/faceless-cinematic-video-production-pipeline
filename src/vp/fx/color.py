@@ -68,7 +68,7 @@ def _apply_cube(frame: np.ndarray, lut: np.ndarray, size: int) -> np.ndarray:
 class ColorGrade:
     def __call__(self, seg, frame: np.ndarray, local_t: float, ctx) -> np.ndarray:
         grade = seg.color_grade_override or ctx.doc.video_meta.get(
-            "base_color_grade", "cold_isolation"
+            "base_color_grade", "clinical"
         )
         lut_rel = ctx.doc.global_assets.get("luts", {}).get(grade)
         if lut_rel:
@@ -76,7 +76,7 @@ class ColorGrade:
             if cube:
                 return _apply_cube(frame, *cube)
 
-        gain, sat, lift, gamma = _GRADES.get(grade, _GRADES["cold_isolation"])
+        gain, sat, lift, gamma = _GRADES.get(grade, _GRADES["clinical"])
         f = frame.astype(np.float32) / 255.0
         f = f * np.array(gain, np.float32)
         luma = (f * _LUMA).sum(axis=2, keepdims=True)

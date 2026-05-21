@@ -1,8 +1,15 @@
 """Extract the worked example from planning/05-sample-case.md.
 
-Used by (a) the schema smoke test and (b) the OFFLINE Stage-2 stub, so the
-whole pipeline can run end-to-end without Anthropic keys against the exact
-spec the build targets (planning/05).
+TEST FIXTURE ONLY. The production Stage-2 pipeline (vp.pipeline.script_gen)
+no longer imports this module: it used to copy the sample's video_meta /
+chapters / global_assets straight into every generated video, which leaked
+the sample case's relationship-manipulation chapters and topic-specific
+metadata into shipped output. Channel defaults now live in
+vp.pipeline.script_gen as module constants; everything per-video is
+derived from the actual approved script.
+
+Kept here for the schema smoke tests in tests/test_schema.py, which still
+need a full known-good ControlDocument to exercise the validator against.
 """
 from __future__ import annotations
 

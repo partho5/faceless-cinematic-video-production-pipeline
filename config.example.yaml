@@ -45,15 +45,6 @@ models:
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 1500, temperature: 0.8 }
 
-  # Thumbnail. mode: frame_compose = pick best video frame + Pillow text
-  # (no model). mode: image_gen = generate a background via image model.
-  thumbnail_image:
-    mode: frame_compose
-    image_gen:
-      provider: google
-      model: gemini-2.5-flash-image   # used only when mode: image_gen
-      api_key_env: GEMINI_API_KEY
-
   # Voiceover (audio generation) — per-segment scene+delivery prompts
   tts_audio:
     provider: google
@@ -67,6 +58,35 @@ models:
     provider: local
     engine: stable-ts
     model: base            # base|small|medium ; fallback engine: mfa
+
+# Channel-wide defaults applied to every video. The mood-coded color grade
+# is a config knob, not a code constant — set it to fit your channel.
+channel:
+  # Default color grade. Must be one of schema.enums.COLOR_GRADE
+  # (cold_isolation, warm_comfort, warm_comfort_dark, clinical,
+  # surveillance, memory, threat, madness, revelation, death, dream,
+  # interrogation, nostalgia). Pick the grade that matches your channel:
+  #   clinical       — flat, even, niche-neutral (good default)
+  #   cold_isolation — dark psychology / thriller
+  #   warm_comfort   — cozy / lifestyle / cooking
+  #   nostalgia      — retro / memory-themed
+  base_color_grade: clinical
+
+# Brand voice for thumbnail prompts (metadata.json -> thumbnail_prompt).
+# Thumbnails are now produced manually: paste `thumbnail_prompt` from
+# metadata.json into Gemini's free web UI (nano banana / gemini-2.5-flash-image).
+# These fields are enforced on EVERY prompt regardless of video topic, so
+# the channel looks like one channel even as subjects change. Set them to
+# match YOUR channel's visual identity — the values below are neutral
+# starter defaults, not a recommendation.
+branding:
+  thumbnail:
+    accent_colors: ["#FFFFFF", "#111111"]   # primary accent, dominant background
+    theme: "cinematic editorial"
+    mood: "engaging, intentional, clean"
+    lighting: "balanced cinematic lighting, intentional contrast"
+    style: "photoreal, 35mm, shallow depth of field, cinematic film grain"
+    negative: "no text, no captions, no lettering, no logos, no watermarks, no busy backgrounds, no collage, no multiple subjects"
 
 # Gemini rate limiting — applies to TTS + LLM fallback calls combined.
 # tier: free  → proactive per-key sliding-window cap at `rpm` req/min.
