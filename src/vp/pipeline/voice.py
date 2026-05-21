@@ -181,8 +181,21 @@ def _chapter_of(seg: Segment) -> str:
     return seg.id.split("_seg")[0] if "_seg" in seg.id else seg.id
 
 
-def _prompt(spec, scene: str, context: str, text: str) -> str:
-    return (f"Scene: {scene} Sample context: {context} Say: {text}")
+_EMOTIONAL_SUFFIX = (
+    "Important: deliver with strong emotional inflection. Use a wide "
+    "pitch range — clear lifts on reveals, distinct drops on landings, "
+    "real weight on key beats. Never flat, never monotone. Trust the "
+    "silences after each emotional moment. The voice must carry the "
+    "meaning, not just the words."
+)
+
+
+def _prompt(spec, scene: str, context: str, text: str,
+            *, highly_emotional: bool = False) -> str:
+    base = f"Scene: {scene} Sample context: {context}"
+    if highly_emotional:
+        base = f"{base} {_EMOTIONAL_SUFFIX}"
+    return f"{base} Say: {text}"
 
 
 class VoiceStage:
@@ -195,6 +208,10 @@ class VoiceStage:
                         or self.spec.extra.get("tts_context", ""))
         self.voice = self.spec.extra.get("voice_name", "Leda")
         self.language: str = ""   # BCP-47 code; "" = let Gemini auto-detect
+        # Channel-level emotional-delivery toggle: when true, _prompt appends
+        # a strong-inflection clause to every chapter's TTS call so the
+        # voice carries real weight on emotional beats. See cfg accessor.
+        self.highly_emotional: bool = cfg.tts_highly_emotional
 
     def _synth(self, pool: KeyPool, text: str) -> np.ndarray:
         from google.genai import types
@@ -218,7 +235,8 @@ class VoiceStage:
             response_modalities=["AUDIO"],
             speech_config=speech_cfg,
         )
-        prompt = _prompt(self.spec, self.scene, self.context, text)
+        prompt = _prompt(self.spec, self.scene, self.context, text,
+                         highly_emotional=self.highly_emotional)
         last = None
         # Budget counts GENUINE failed API calls only. acquire() may block on
         # cooldowns without consuming this, so a transient 429 storm waits

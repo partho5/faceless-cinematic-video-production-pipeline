@@ -73,6 +73,15 @@ models:
     engine: stable-ts
     model: base            # base|small|medium ; fallback engine: mfa
 
+# Per-channel TTS behavior knobs.
+tts:
+  # When true, every TTS call gets a strong-inflection clause appended to
+  # its voice direction: wide pitch range, real lifts on reveals, real
+  # drops on landings, weight on emotional beats. Turn ON for narration
+  # that needs to land emotionally (storytelling, drama, persuasion);
+  # turn OFF for flat informational delivery (tutorials, reference, news).
+  highly_emotional: true
+
 # Channel-wide defaults applied to every video. Code constants
 # (vp.pipeline.script_gen._CHANNEL_VIDEO_META) cover the niche-neutral
 # look numbers; the mood-coded base_color_grade lives here so it's a

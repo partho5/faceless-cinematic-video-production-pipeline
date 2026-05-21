@@ -161,6 +161,17 @@ class Config:
         }
 
     @property
+    def tts_highly_emotional(self) -> bool:
+        """When true, append a strong-inflection clause to every TTS prompt.
+
+        Read by VoiceStage. Wide pitch range, real lifts on reveals, real
+        drops on landings, weight on emotional beats. Set false (default)
+        for flat / informational delivery. Tuned in
+        `config.yaml -> tts.highly_emotional`.
+        """
+        return bool((self._raw.get("tts") or {}).get("highly_emotional", False))
+
+    @property
     def channel_base_color_grade(self) -> str:
         """Channel-default color grade applied to every video at render.
 

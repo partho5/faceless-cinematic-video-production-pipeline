@@ -100,8 +100,16 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         meta_encoder: str | None = None,
         voice: str | None = None,
         language: str | None = None,
-        subtitle_language: str | None = None) -> dict:
+        subtitle_language: str | None = None,
+        highly_emotional: bool | None = None) -> dict:
     cfg = get_config()
+    # CLI override for the channel-level emotional-delivery toggle. None
+    # means "use config.yaml -> tts.highly_emotional"; True/False mean
+    # "force on/off for this run only" (e.g. when invoked from the GUI
+    # checkbox). Patches the in-memory YAML dict so the property reads it.
+    if highly_emotional is not None:
+        cfg._raw.setdefault("tts", {})["highly_emotional"] = bool(
+            highly_emotional)
     for w in cfg.validate():
         _log(f"warn: {w}")
 
@@ -364,6 +372,15 @@ def main(argv=None) -> int:
                     help="BCP-47 code for on-screen subtitle text language; "
                          "defaults to the TTS language when omitted. "
                          "Any translation uses English-prompted LLM calls only.")
+    he = ap.add_mutually_exclusive_group()
+    he.add_argument("--highly-emotional", dest="highly_emotional",
+                    action="store_true", default=None,
+                    help="force the strong-inflection TTS suffix ON for this "
+                         "run (overrides config.yaml -> tts.highly_emotional)")
+    he.add_argument("--no-highly-emotional", dest="highly_emotional",
+                    action="store_false",
+                    help="force the strong-inflection TTS suffix OFF for "
+                         "this run (overrides config.yaml)")
     a = ap.parse_args(argv)
     r = run(a.topic, preset=a.preset, approve=a.approve,
             segments=a.segments, do_upload=not a.no_upload,
@@ -374,7 +391,8 @@ def main(argv=None) -> int:
             meta_artist=a.meta_author, meta_copyright=a.meta_copyright,
             meta_encoder=a.meta_encoder,
             voice=a.voice, language=a.language,
-            subtitle_language=a.subtitle_language)
+            subtitle_language=a.subtitle_language,
+            highly_emotional=a.highly_emotional)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

@@ -227,8 +227,16 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
 
 
 def tts_framing(spec, topic: str) -> tuple[str, str] | None:
-    """Best-effort: derive a niche-matched TTS scene + context from the
-    topic so the user never has to write voice direction by hand.
+    """Best-effort: derive niche-matched FIVE-FIELD voice direction from the
+    topic, returned as a (scene, context) pair so VoiceStage consumes it
+    unchanged.
+
+    The LLM produces five orthogonal dimensions — scene, register, tone,
+    pacing, inflection — that pack into the two-string API the rest of the
+    pipeline expects. Gemini TTS responds to explicit layered direction far
+    better than a single mood blob: a sourdough video sounds like a warm
+    kitchen voice and a heist breakdown sounds like a controlled narrator
+    without any per-video hand-tuning.
 
     Returns (scene, context) or None on ANY failure / offline — the caller
     then keeps the channel-default framing from config. Never raises.
@@ -242,19 +250,42 @@ def tts_framing(spec, topic: str) -> tuple[str, str] | None:
             spec,
             system=(
                 "You are a voiceover director. Given a video TOPIC, return "
-                "STRICT JSON and nothing else: "
-                '{"scene": "<one sentence naming the voice style and '
-                'delivery>", "context": "<1-2 sentences: mood, emotional '
-                'tone, pacing, the kind of pauses>"}. Match the voice to the '
-                "topic (e.g. soothing for a bedtime story, intense for a "
-                "psychology breakdown). No prose outside the JSON."
+                "STRICT JSON and nothing else with these FIVE fields, each "
+                "ONE short sentence (8–20 words). Every field must match "
+                "the topic — a bedtime story sounds nothing like a heist "
+                "breakdown, and a cooking video sounds nothing like a "
+                "psychology explainer:\n"
+                "{\n"
+                '  "scene":      "<the imagined speaking moment: where the '
+                "narrator is, who they're addressing>\",\n"
+                '  "register":   "<intimacy + authority: whisper-close, '
+                "friend-on-couch, lecturer, fireside chat, etc.>\",\n"
+                '  "tone":       "<dominant emotional color: warm, knowing, '
+                "conspiratorial, anxious, awed, patient, deadpan, etc.>\",\n"
+                '  "pacing":     "<speed + pause discipline: unhurried with '
+                "deliberate pauses, clipped and rising, measured and even, "
+                "etc.>\",\n"
+                '  "inflection": "<where the voice rises and falls: lift on '
+                "reveals, drop on landings, flat for clinical beats, etc.>\"\n"
+                "}\n"
+                "Never default to thriller / psychology voice unless the "
+                "topic itself is one of those. No prose outside the JSON."
             ),
             user=f"TOPIC: {topic}",
         )
         blob = raw[raw.find("{"): raw.rfind("}") + 1]
         d = json.loads(blob)
         scene = str(d.get("scene", "")).strip()
-        context = str(d.get("context", "")).strip()
-        return (scene, context) if scene and context else None
+        register = str(d.get("register", "")).strip()
+        tone = str(d.get("tone", "")).strip()
+        pacing = str(d.get("pacing", "")).strip()
+        inflection = str(d.get("inflection", "")).strip()
+        if not (scene and register and tone and pacing and inflection):
+            return None
+        context = (
+            f"Register: {register} Tone: {tone} "
+            f"Pacing: {pacing} Inflection: {inflection}"
+        )
+        return (scene, context)
     except Exception:
         return None

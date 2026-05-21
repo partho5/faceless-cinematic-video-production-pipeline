@@ -724,9 +724,10 @@ class App:
 
     def _build_render_section(self, p) -> None:
         r = self._card(p, "Rendering Settings")
+        prof = _load_render_profile()
 
         self.add_music = tk.BooleanVar(
-            value=_load_render_profile().get("add_music", True))
+            value=prof.get("add_music", True))
         ttk.Checkbutton(r, variable=self.add_music,
                         style="Switch.TCheckbutton",
                         text="Add background music").grid(
@@ -735,6 +736,18 @@ class App:
                   text="uncheck to render voice-only (skips music stage)",
                   style="MutedOn.TLabel").grid(
             row=1, column=0, sticky="w", pady=(0, 2))
+
+        self.highly_emotional = tk.BooleanVar(
+            value=prof.get("highly_emotional", True))
+        ttk.Checkbutton(r, variable=self.highly_emotional,
+                        style="Switch.TCheckbutton",
+                        text="Highly emotional voice").grid(
+            row=2, column=0, sticky="w", pady=(8, 2))
+        ttk.Label(r,
+                  text="uncheck for flat / informational delivery",
+                  style="MutedOn.TLabel").grid(
+            row=3, column=0, sticky="w", pady=(0, 2))
+
         r.columnconfigure(0, weight=1)
 
     def _build_voice_section(self, p) -> None:
@@ -1049,6 +1062,8 @@ class App:
             argv += ["--segments", SAMPLE_SEGMENTS]
         if not self.add_music.get():
             argv.append("--no-music")
+        argv.append("--highly-emotional" if self.highly_emotional.get()
+                    else "--no-highly-emotional")
         if self._resuming:
             argv.append("--resume")
         voice = self.voice_var.get().strip()
@@ -1078,6 +1093,7 @@ class App:
         })
         _save_render_profile({
             "add_music": self.add_music.get(),
+            "highly_emotional": self.highly_emotional.get(),
         })
         argv = self._argv()
         if not argv:

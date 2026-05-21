@@ -24,6 +24,7 @@ install_report.json
 run.log
 .resume_state.json
 .metadata_profile.json
+.render_profile.json
 *.lnk
 assets/icon.ico
 
