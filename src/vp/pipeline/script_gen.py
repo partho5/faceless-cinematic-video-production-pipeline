@@ -205,7 +205,7 @@ def split_chapters(script_md: str) -> list[tuple[str, str]]:
 
 
 _CH_LABEL_RX = re.compile(
-    r"^(?P<name>.+?)\s*[·•|-]\s*"
+    r"^(?P<name>.+?)\s*[·•|\-–—]\s*"
     r"(?P<start>\d+:\d{2}(?::\d{2})?)\s*[-–—]\s*"
     r"(?P<end>\d+:\d{2}(?::\d{2})?)\s*$"
 )
@@ -294,35 +294,176 @@ _SEG_SYS = (
     "Do NOT emit sound_fx — sound effects are chosen later by a dedicated "
     "editorial pass; inventing them here is ignored. "
     "Rapid enumerations -> camera_motion 'rapid_clip_montage' with "
-    "montage_clips [{query,duration}]. start/end are ORDERING TARGETS only. "
-    "Return ONLY a JSON array of segments, no prose."
+    "montage_clips [{query,duration}]. "
+    "REQUIRED non-empty strings on EVERY segment: text_overlay (the on-screen "
+    "caption, never blank), tts_scene (one short sentence of spoken narration "
+    "— may equal text_overlay verbatim if the caption is the narration), "
+    "tts_delivery (one short delivery direction, e.g. 'calm, measured'). "
+    "If a beat is overlay-only with no spoken line, still copy text_overlay "
+    "into tts_scene so the TTS has something to read. "
+    "start/end are ordering hints only; use ABSOLUTE timestamps (m:ss from "
+    "video start) matching the chapter's time window — do NOT restart at 0:00 "
+    "per chapter. "
+    "Return ONLY a JSON array of segments, no prose, no trailing commas."
 )
 
 
-def _repair_zero_timestamps(all_segs: list[dict], n_chapters: int,
-                            total_duration: float) -> None:
-    """Evenly distribute timestamps for any chapter where the LLM emitted all zeros.
+# Regex that strips trailing commas before } or ] — common LLM mistake the
+# stdlib json parser rejects but jq/JSON5 tolerate.
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
-    Gemini occasionally emits start=0/end=0 for all segments in a chapter.
-    These are ordering targets only (G1 reflow overwrites with real audio timing),
-    but the validator requires end > start. Assigns synthetic slots so the
-    pipeline is not blocked.
+
+def _extract_objects(window: str) -> list[dict]:
+    """Brace-balanced scan that pulls every parseable {...} from `window`.
+
+    Used as a salvage path when the array as a whole won't parse (a single
+    broken segment shouldn't lose the rest of the chapter). Strings are
+    tracked so braces inside string literals don't fool the depth counter.
+    Returns whatever it could parse; never raises.
     """
-    total = float(total_duration or 0)
-    slot = (total / n_chapters) if (total > 0 and n_chapters > 0) else 60.0
-    for ci in range(1, n_chapters + 1):
+    out: list[dict] = []
+    i = 0
+    n = len(window)
+    while i < n:
+        if window[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        j = i
+        while j < n:
+            c = window[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            obj = json.loads(window[i:j + 1])
+                            if isinstance(obj, dict):
+                                out.append(obj)
+                        except (ValueError, json.JSONDecodeError):
+                            try:
+                                obj = json.loads(_TRAILING_COMMA_RE.sub(
+                                    r"\1", window[i:j + 1]))
+                                if isinstance(obj, dict):
+                                    out.append(obj)
+                            except (ValueError, json.JSONDecodeError):
+                                pass
+                        break
+            j += 1
+        i = j + 1
+    return out
+
+
+def _parse_segments_json(raw: str) -> list[dict]:
+    """Robust array parser for Stage-2 LLM output.
+
+    Strategies in order:
+      1. Standard: extract [...] window, json.loads.
+      2. Strip trailing commas (common LLM artifact), retry.
+      3. Brace-balanced per-object salvage — keeps the chapter alive even
+         if one segment is malformed or the array's closing ] was dropped.
+
+    Raises ValueError only if zero objects can be salvaged. The caller's
+    3-retry budget then triggers a repair prompt.
+    """
+    # 1. Standard path
+    try:
+        lo = raw.index("[")
+        hi = raw.rindex("]") + 1
+        window = raw[lo:hi]
+    except ValueError:
+        # No array brackets at all — fall back to scanning the whole string
+        # for any {...} objects (Anthropic sometimes returns NDJSON-ish).
+        salvaged = _extract_objects(raw)
+        if salvaged:
+            return salvaged
+        raise ValueError("no JSON array or objects found in LLM output")
+
+    try:
+        data = json.loads(window)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # 2. Trailing commas
+    try:
+        data = json.loads(_TRAILING_COMMA_RE.sub(r"\1", window))
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+    except (ValueError, json.JSONDecodeError):
+        pass
+
+    # 3. Per-object salvage
+    salvaged = _extract_objects(window)
+    if salvaged:
+        return salvaged
+    raise ValueError(
+        "stage 2 output unparseable even after trailing-comma + per-object "
+        "salvage"
+    )
+
+
+def _repair_chapter_timestamps(all_segs: list[dict],
+                               chapter_specs: list[dict]) -> None:
+    """Re-base segments so every chapter's timestamps land in its window.
+
+    Two real patterns the LLM produces (G3 cache evidence):
+      A) all-zeros — no ordering hint at all. Distribute evenly across the
+         chapter so validator's end>start check passes and segments sort in
+         chapter order.
+      B) per-chapter RELATIVE — segments start at 0:00 inside chapter N when
+         chapter N actually begins at, say, 1:10. Re-base by adding (ch_start
+         - first_seg_start) so segments don't interleave when the validator
+         sorts by start.
+
+    Timestamps are ordering hints only (G1 reflow overwrites with real audio
+    time), so this is purely a cosmetic/ordering fix — but without it, the
+    validator emits dozens of "planned segment gap" warnings AND any future
+    sort-by-start pass would shuffle segments across chapters.
+    """
+    for ci, spec in enumerate(chapter_specs, 1):
         prefix = f"c{ci}_"
         ch = [s for s in all_segs if (s.get("id") or "").startswith(prefix)]
         if not ch:
             continue
-        if not all(float(s.get("start", 0)) == 0 and float(s.get("end", 0)) == 0
-                   for s in ch):
-            continue  # LLM gave real timestamps — don't touch
-        ch_start = (ci - 1) * slot
-        step = slot / len(ch)
-        for i, s in enumerate(ch):
-            s["start"] = round(ch_start + i * step, 2)
-            s["end"] = round(ch_start + (i + 1) * step, 2)
+        ch_start = float(spec.get("start", 0) or 0)
+        ch_end = float(spec.get("end", ch_start + 60.0) or (ch_start + 60.0))
+        ch_dur = max(1.0, ch_end - ch_start)
+
+        starts = [float(s.get("start", 0) or 0) for s in ch]
+        ends = [float(s.get("end", 0) or 0) for s in ch]
+
+        # case A: all-zero — distribute evenly
+        if all(s == 0 and e == 0 for s, e in zip(starts, ends)):
+            step = ch_dur / len(ch)
+            for i, s in enumerate(ch):
+                s["start"] = round(ch_start + i * step, 2)
+                s["end"] = round(ch_start + (i + 1) * step, 2)
+            continue
+
+        # case B: per-chapter relative — first segment starts well before the
+        # chapter's expected start (>5s tolerance). Shift, don't scale; we
+        # only need ordering correctness, not absolute accuracy.
+        first_start = starts[0]
+        if ch_start > 5.0 and first_start < ch_start - 5.0:
+            offset = ch_start - first_start
+            for s in ch:
+                s["start"] = round(float(s.get("start", 0) or 0) + offset, 2)
+                s["end"] = round(float(s.get("end", 0) or 0) + offset, 2)
 
 
 class SegmentStage:
@@ -340,9 +481,9 @@ class SegmentStage:
         if prior_repair:
             user += f"\n\nThe previous output FAILED validation: {prior_repair}\nFix and resend."
         raw = anthropic_message(self.spec, system=_SEG_SYS, user=user)
-        segs = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
+        segs = _parse_segments_json(raw)
         # Normalize start/end early — free-tier fallback models often emit
-        # "m:ss" strings where Claude emits floats. _repair_zero_timestamps
+        # "m:ss" strings where Claude emits floats. _repair_chapter_timestamps
         # runs on these raw dicts before the dataclass coerces them.
         for s in segs:
             if "start" in s:
@@ -405,7 +546,7 @@ class SegmentStage:
                 break
         if not all_segs:
             raise RuntimeError("stage2: no segments produced from any chapter")
-        _repair_zero_timestamps(all_segs, n, total_duration)
+        _repair_chapter_timestamps(all_segs, chapter_specs)
 
         # back-fill segment_count from what the LLM actually produced per
         # chapter (so the doc reflects reality, not the script's plan).

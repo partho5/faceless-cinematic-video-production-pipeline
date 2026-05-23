@@ -104,12 +104,42 @@ def validate(
                 f"-> synthetic +2 s slot (G1 reflow overwrites)"
             )
             s.end = s.start + 2.0
-        if not (s.tts_scene and s.tts_scene.strip()):
-            r.errors.append(f"{s.id}: tts_scene empty")
+
+        # TTS/caption fields: the main VoiceStage path uses text_overlay
+        # only; tts_scene/tts_delivery feed the per-segment fallback
+        # (tts_gemini.py). All three are auto-repaired with mutual fallback
+        # rather than rejected — an LLM that drops one field on a
+        # caption-only beat must not block the entire render.
+        ts = (s.tts_scene or "").strip()
+        to = (s.text_overlay or "").strip()
+        if not ts and to:
+            s.tts_scene = to
+            r.warnings.append(
+                f"{s.id}: tts_scene empty -> repaired from text_overlay"
+            )
+        elif not to and ts:
+            s.text_overlay = ts
+            r.warnings.append(
+                f"{s.id}: text_overlay empty -> repaired from tts_scene"
+            )
+        elif not ts and not to:
+            # Both empty: the segment carries no spoken or visible content.
+            # Stamp a minimal placeholder so the chapter-based TTS still
+            # emits *something* (a 1-syllable beat) instead of skipping the
+            # whole chapter when every segment is empty. Better silent
+            # filler than a crashed reflow.
+            placeholder = "..."
+            s.text_overlay = placeholder
+            s.tts_scene = placeholder
+            r.warnings.append(
+                f"{s.id}: text_overlay AND tts_scene empty "
+                f"-> placeholder '...' (segment will read as a brief pause)"
+            )
         if not (s.tts_delivery and s.tts_delivery.strip()):
-            r.errors.append(f"{s.id}: tts_delivery empty")
-        if not (s.text_overlay and s.text_overlay.strip()):
-            r.warnings.append(f"{s.id}: text_overlay empty (no caption shown)")
+            s.tts_delivery = "natural narration"
+            r.warnings.append(
+                f"{s.id}: tts_delivery empty -> 'natural narration'"
+            )
 
         # silence pacing sane
         for fld in ("pre_silence_ms", "post_silence_ms"):

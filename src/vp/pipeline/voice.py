@@ -313,6 +313,19 @@ class VoiceStage:
             text = " ".join(s.text_overlay.strip()
                             for s in segs if s.text_overlay).strip()
             if not text:
+                # Defense-in-depth: validator-repair normally guarantees a
+                # non-empty text_overlay per segment, but if a chapter still
+                # arrives with nothing to speak, write a brief silent stub
+                # per segment so downstream reflow() (which requires every
+                # segment to have an audio_path) never crashes the run.
+                silence = np.zeros(int(0.3 * SR), dtype=np.float32)
+                for s in segs:
+                    p = audio_dir / f"{s.id}.wav"
+                    write_wav(p, silence, SR)
+                    s.audio_path = str(p)
+                print(f"[vp] voice: chapter {ch} has no spoken text "
+                      f"— wrote silent stubs for {len(segs)} segment(s)",
+                      flush=True)
                 continue
             key = _cache_key(text, self.voice, self.spec.model,
                              self.scene, self.context, self.language)
