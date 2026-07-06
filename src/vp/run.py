@@ -335,6 +335,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
 
 
 def main(argv=None) -> int:
+    import licensing; licensing.enforce()
     ap = argparse.ArgumentParser(prog="vp.run")
     ap.add_argument("topic")
     ap.add_argument("--preset", choices=["preview", "final"], default="preview")

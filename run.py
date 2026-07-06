@@ -1435,6 +1435,7 @@ def _set_window_icon(root: tk.Tk) -> None:
 
 
 def main() -> int:
+    import licensing; licensing.enforce()
     if os.name == "nt":
         # Prevent Windows from grouping this window with other pythonw.exe
         # processes on the taskbar; must be called before the Tk window exists.
