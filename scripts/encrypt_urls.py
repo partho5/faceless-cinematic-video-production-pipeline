@@ -7,7 +7,7 @@ ENCRYPTION_KEY = b"nanybot_secret_key_123!"
 
 def main():
     urls = {
-        "validate": "https://youtube.nanybot.com/api/license/validate"
+        "validate": "https://youtube-automation-licensing-basic.vercel.app/api/validate"
     }
     
     # Serialize JSON to bytes
