@@ -18,6 +18,11 @@ LICENSE_KEY_FILE = ROOT / ".lic_key"
 # Key for XOR decryption of URLs
 ENCRYPTION_KEY = b"nanybot_secret_key_123!"
 
+# Global license metadata (filled on successful validation)
+LICENSED_TO = "Unknown"
+EXPIRE_TIME = "Unknown"
+EXPIRE_TIME_READABLE = "Unknown"
+
 def get_machine_id() -> str:
     """Generates a persistent hardware identifier for Windows and macOS."""
     os_name = platform.system().lower()
@@ -206,4 +211,19 @@ def enforce() -> None:
         
     # Successfully validated
     save_key(key)
+    
+    global LICENSED_TO, EXPIRE_TIME, EXPIRE_TIME_READABLE
+    LICENSED_TO = licensed_to
+    EXPIRE_TIME = expire_time
+    
+    # Format readable date (e.g. Dec 31, 2028)
+    readable_date = expire_time
+    try:
+        cleaned = expire_time.strip().replace("Z", "").split(".")[0]
+        dt = datetime.datetime.strptime(cleaned, "%Y-%m-%dT%H:%M:%S")
+        readable_date = dt.strftime("%b %d, %Y")
+    except Exception:
+        pass
+    EXPIRE_TIME_READABLE = readable_date
+    
     print(f"[Licensing] Valid license. Registered to: {licensed_to} (Expires: {expire_time})")

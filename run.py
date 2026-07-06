@@ -643,6 +643,9 @@ class App:
         h.pack(fill="x")
         ttk.Label(h, text=_APP_NAME,
                   style="H1.TLabel").pack(anchor="w")
+        import licensing
+        lic_text = f"Licensed to {licensing.LICENSED_TO}, valid till {licensing.EXPIRE_TIME_READABLE}"
+        ttk.Label(h, text=lic_text, style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         ttk.Label(h, style="Muted.TLabel",
                   text="Topic in, finished cinematic video out — script, "
                   "voice, footage, render and metadata, fully automated."
