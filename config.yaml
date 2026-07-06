@@ -9,7 +9,8 @@ models:
     provider: anthropic
     # prod default. Dev: set VP_LLM_MODEL=claude-haiku-4-5-20251001 in .env
     # to override this + segmentation_direction for cheaper iteration.
-    model: claude-sonnet-4-6
+    # claude-sonnet-4-6 | claude-haiku-4-5-20251001
+    model: claude-haiku-4-5-20251001
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 4000, temperature: 0.9 }
 
@@ -17,7 +18,8 @@ models:
   # (structured, per-chapter; see planning/09 + planning/04)
   segmentation_direction:
     provider: anthropic
-    model: claude-sonnet-4-6      # prod default; VP_LLM_MODEL overrides (dev)
+    # claude-sonnet-4-6
+    model: claude-haiku-4-5-20251001      # prod default; VP_LLM_MODEL overrides (dev)
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 8000, temperature: 0.4 }
 
@@ -27,7 +29,8 @@ models:
   # prod default sonnet-4-6; dev: VP_LLM_MODEL overrides (see config.py).
   sound_design:
     provider: anthropic
-    model: claude-sonnet-4-6
+    # claude-sonnet-4-6
+    model: claude-haiku-4-5-20251001
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 2000, temperature: 0.2 }
 
@@ -43,7 +46,8 @@ models:
   # Title variants / description / tags / chapters
   metadata_text:
     provider: anthropic
-    model: claude-sonnet-4-6
+    # claude-sonnet-4-6
+    model: claude-haiku-4-5-20251001
     api_key_env: ANTHROPIC_API_KEY
     params: { max_tokens: 1500, temperature: 0.8 }
 
@@ -59,12 +63,9 @@ models:
     voice_name: Leda                    # locked: approved voice
     # AI-Studio-style framing prepended to every chapter (the prompt the
     # user validated). Override per-video via video_meta.tts_scene/tts_context.
-    tts_scene: "A dramatic monologue or a suspenseful narrative voiceover."
+    tts_scene: "A dark psychological documentary narration. Like exposing a system that has been manipulating people in plain sight."
     tts_context: >-
-      A psychological thriller, a drama film, or a modern audio drama.
-      It captures the exact moment of a shattered illusion - the quiet,
-      painful epiphany where a victim realizes they have been subtly
-      brainwashed and controlled over a long period.
+      A consumer psychology channel revealing hidden truths about buying behavior. Voice is calm and authoritative — then sharp and loud when exposing a secret the audience never suspected.
     params: { temperature: 1.0 }
 
   # Word-level timing — local, no API. See planning/06.
