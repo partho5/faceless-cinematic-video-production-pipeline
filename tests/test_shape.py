@@ -25,10 +25,10 @@ def test_clip_provider_pexels_search_params():
 
             cp._search_pexels("test query", 5.0)
 
-            # Verify that get() was called with orientation="vertical"
+            # Verify that get() was called with orientation="portrait"
             mock_session.get.assert_called_once()
             args, kwargs = mock_session.get.call_args
-            assert kwargs["params"]["orientation"] == "vertical"
+            assert kwargs["params"]["orientation"] == "portrait"
 
 
 def test_render_engine_preset_swapping():

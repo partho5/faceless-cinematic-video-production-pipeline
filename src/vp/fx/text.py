@@ -215,7 +215,8 @@ class TextRenderer:
                                int(size * scale))
             x = w.x + dx + out_dx
             y = w.y + dy + out_dy
-            stroke = style.get("stroke", 1)
+            font_size = int(size * scale)
+            stroke = max(4, font_size // 12)
             d.text((x, y), w.text, font=fs, fill=color + (alpha,),
                    stroke_width=stroke, stroke_fill=(0, 0, 0, alpha))
 

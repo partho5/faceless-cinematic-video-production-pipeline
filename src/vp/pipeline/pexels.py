@@ -96,19 +96,22 @@ class ClipProvider:
         if self._session is None:
             self._session = requests.Session()
             self._session.headers["Authorization"] = self.cfg.env("PEXELS_API_KEY")
+        orientation = "portrait" if self.shape == "vertical" else "landscape"
         r = self._session.get(
             "https://api.pexels.com/videos/search",
-            params={"query": query, "orientation": self.shape,
+            params={"query": query, "orientation": orientation,
                     "size": "large", "per_page": 15},
             timeout=20,
         )
         r.raise_for_status()
         for v in r.json().get("videos", []):
+            width = v.get("width", 0)
+            height = v.get("height", 0)
             if self.shape == "landscape":
-                if v.get("width", 0) < 1920 or v.get("height", 0) < 1080:
+                if width < 1920 or height < 1080 or width <= height:
                     continue
             else:
-                if v.get("width", 0) < 1080 or v.get("height", 0) < 1920:
+                if width < 1080 or height < 1920 or width >= height:
                     continue
             cid = str(v["id"])
             if not self.anti.fresh(cid):
@@ -169,10 +172,22 @@ class ClipProvider:
                 if tt >= clip_len:  # loop short clips
                     tt = start + (local_t % max(0.1, clip_len - start))
                 f = vc.get_frame(tt)
-                if f.shape[0] != h or f.shape[1] != w:
-                    yi = np.linspace(0, f.shape[0] - 1, h, dtype=int)
-                    xi = np.linspace(0, f.shape[1] - 1, w, dtype=int)
-                    f = f[yi][:, xi]
+                sh, sw = f.shape[:2]
+                if sh != h or sw != w:
+                    target_ar = w / h
+                    source_ar = sw / sh
+                    if source_ar > target_ar:
+                        crop_w = int(sh * target_ar)
+                        x0 = (sw - crop_w) // 2
+                        f_cropped = f[:, x0 : x0 + crop_w]
+                    else:
+                        crop_h = int(sw / target_ar)
+                        y0 = (sh - crop_h) // 2
+                        f_cropped = f[y0 : y0 + crop_h, :]
+                    
+                    yi = np.linspace(0, f_cropped.shape[0] - 1, h, dtype=int)
+                    xi = np.linspace(0, f_cropped.shape[1] - 1, w, dtype=int)
+                    f = f_cropped[yi][:, xi]
                 return f.astype(np.uint8)
 
             # expose close() so the render loop can release the ffmpeg
