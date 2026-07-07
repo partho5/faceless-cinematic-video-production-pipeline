@@ -23,6 +23,10 @@ LICENSED_TO = "Unknown"
 EXPIRE_TIME = "Unknown"
 EXPIRE_TIME_READABLE = "Unknown"
 
+# Free quota handling
+USAGE_TRACKING_FILE = ROOT / ".usage_quota"
+FREE_QUOTA_LIMIT = 10
+
 def get_machine_id() -> str:
     """Generates a persistent hardware identifier for Windows and macOS."""
     os_name = platform.system().lower()
@@ -165,8 +169,46 @@ def is_expired(expire_time_str: str) -> bool:
         return True
 
 
+def check_and_use_free_quota() -> bool:
+    """Tracks monthly usage locally. Returns True if within free quota."""
+    current_month = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
+    
+    usage_data = {"month": current_month, "count": 0}
+    
+    # Load existing tracking data if available
+    if USAGE_TRACKING_FILE.exists():
+        try:
+            data = json.loads(USAGE_TRACKING_FILE.read_text(encoding="utf-8"))
+            if data.get("month") == current_month:
+                usage_data = data
+        except Exception:
+            pass # Reset on corruption
+            
+    # Check if quota is available
+    if usage_data["count"] < FREE_QUOTA_LIMIT:
+        usage_data["count"] += 1
+        try:
+            USAGE_TRACKING_FILE.write_text(json.dumps(usage_data), encoding="utf-8")
+        except Exception:
+            pass
+        print(f"[Licensing] Using free quota. ({usage_data['count']}/{FREE_QUOTA_LIMIT} this month)")
+        return True
+        
+    return False
+
+
 def enforce() -> None:
     """Enforces license validity on startup. Exits if verification fails or is unreachable."""
+
+    global LICENSED_TO, EXPIRE_TIME, EXPIRE_TIME_READABLE
+    
+    """ Allows free quota bypass."""
+    # Check if the user can use a free slot this month
+    if check_and_use_free_quota():
+        LICENSED_TO = "Free Tier User"
+        EXPIRE_TIME_READABLE = "N/A (Free Quota)"
+        return
+
     try:
         urls = decrypt_urls()
         validate_url = urls.get("validate")
@@ -212,7 +254,6 @@ def enforce() -> None:
     # Successfully validated
     save_key(key)
     
-    global LICENSED_TO, EXPIRE_TIME, EXPIRE_TIME_READABLE
     LICENSED_TO = licensed_to
     EXPIRE_TIME = expire_time
     
