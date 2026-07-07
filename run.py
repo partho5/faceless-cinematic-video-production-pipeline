@@ -376,6 +376,7 @@ class App:
         self.topic.delete(0, "end")
         self.topic.insert(0, topic)
         self.preset.set(state.get("preset", "final"))
+        self.shape.set(state.get("shape", "landscape"))
         self.minutes.delete(0, "end")
         self.minutes.insert(0, state.get("minutes", "6"))
         hint = state.get("hint", "")
@@ -644,12 +645,15 @@ class App:
         ttk.Label(h, text=_APP_NAME,
                   style="H1.TLabel").pack(anchor="w")
         import licensing
+        style = ttk.Style()
+        style.configure("License.TLabel", foreground="#50F726") 
+
         lic_text = f"Licensed to {licensing.LICENSED_TO}, valid till {licensing.EXPIRE_TIME_READABLE}"
-        ttk.Label(h, text=lic_text, style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
+        ttk.Label(h, text=lic_text, style="License.TLabel").pack(anchor="w", pady=(2, 0))
         ttk.Label(h, style="Muted.TLabel",
-                  text="Topic in, finished cinematic video out — script, "
-                  "voice, footage, render and metadata, fully automated."
-                  ).pack(anchor="w", pady=(2, 0))
+                text="Topic in, finished cinematic video out — script, "
+                "voice, footage, render and metadata, fully automated."
+                ).pack(anchor="w", pady=(2, 0))
         bar = tk.Frame(h, bg=T.ACCENT, height=3)
         bar.pack(fill="x", pady=(12, 0))
 
@@ -688,23 +692,33 @@ class App:
     def _build_output(self, p) -> None:
         o = self._card(p, "Output Settings")
 
-        ttk.Label(o, text="Quality", style="On.TLabel").grid(
+        ttk.Label(o, text="Video Orientation", style="On.TLabel").grid(
             row=0, column=0, sticky="w", pady=4)
+        self.shape = tk.StringVar(value="landscape")
+        ttk.Radiobutton(o, text="Landscape (long video)", variable=self.shape,
+                        value="landscape").grid(row=0, column=1, sticky="w",
+                                                padx=10)
+        ttk.Radiobutton(o, text="Vertical (short video)", variable=self.shape,
+                        value="vertical").grid(row=0, column=2, sticky="w",
+                                               padx=10)
+
+        ttk.Label(o, text="Quality", style="On.TLabel").grid(
+            row=1, column=0, sticky="w", pady=4)
         self.preset = tk.StringVar(value="final")
         ttk.Radiobutton(o, text="Best — full 1080p", variable=self.preset,
-                        value="final").grid(row=0, column=1, sticky="w",
+                        value="final").grid(row=1, column=1, sticky="w",
                                             padx=10)
         ttk.Radiobutton(o, text="Quick look — rough & fast",
                         variable=self.preset, value="preview").grid(
-            row=0, column=2, sticky="w", padx=10)
+            row=1, column=2, sticky="w", padx=10)
 
         ttk.Label(o, text="Length (minutes)", style="On.TLabel").grid(
-            row=1, column=0, sticky="w", pady=4)
+            row=2, column=0, sticky="w", pady=4)
         self.minutes = ttk.Entry(o, width=8)
         self.minutes.insert(0, "6")
-        self.minutes.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        self.minutes.grid(row=2, column=1, sticky="w", padx=10, pady=4)
         ttk.Label(o, text="approximate — the story is written to fit",
-                  style="MutedOn.TLabel").grid(row=1, column=2, columnspan=2,
+                  style="MutedOn.TLabel").grid(row=2, column=2, columnspan=2,
                                                sticky="w")
 
         self.upload = tk.BooleanVar(value=False)
@@ -712,14 +726,14 @@ class App:
         self.sample = tk.BooleanVar(value=False)
         ttk.Checkbutton(o, variable=self.upload, style="Switch.TCheckbutton",
                         text="Upload to my YouTube (stays PRIVATE)").grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(10, 1))
+            row=3, column=0, columnspan=3, sticky="w", pady=(10, 1))
         ttk.Checkbutton(o, variable=self.review, style="Switch.TCheckbutton",
                         text="Let me read & approve the story before render"
-                        ).grid(row=3, column=0, columnspan=3, sticky="w",
+                        ).grid(row=4, column=0, columnspan=3, sticky="w",
                                pady=1)
         ttk.Checkbutton(o, variable=self.sample, style="Switch.TCheckbutton",
                         text="Short sample first (opening only — faster)"
-                        ).grid(row=4, column=0, columnspan=3, sticky="w",
+                        ).grid(row=5, column=0, columnspan=3, sticky="w",
                                pady=1)
         o.columnconfigure(2, weight=1)
         self._build_render_section(p)
@@ -1051,7 +1065,8 @@ class App:
                                    "Length must be a positive number.")
             return None
         argv = [sys.executable, "-m", "vp.run", topic,
-                "--preset", self.preset.get(), "--minutes", mins]
+                "--preset", self.preset.get(), "--minutes", mins,
+                "--shape", self.shape.get()]
         hint = self.hint.get("1.0", "end").strip()
         if hint:
             argv += ["--hint", hint]
@@ -1149,6 +1164,7 @@ class App:
         _save_resume_state({
             "topic": self.topic.get().strip(),
             "preset": self.preset.get(),
+            "shape": self.shape.get(),
             "minutes": self.minutes.get().strip(),
             "hint": self.hint.get("1.0", "end").strip(),
             "upload": self.upload.get(),

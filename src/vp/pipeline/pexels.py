@@ -79,8 +79,9 @@ def _procedural_base(query: str, w: int, h: int) -> np.ndarray:
 
 
 class ClipProvider:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, shape: str = "landscape"):
         self.cfg = cfg
+        self.shape = shape
         self.spec_offline = not cfg.env("PEXELS_API_KEY")
         self.cache_dir = CLIP_CACHE
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -97,18 +98,25 @@ class ClipProvider:
             self._session.headers["Authorization"] = self.cfg.env("PEXELS_API_KEY")
         r = self._session.get(
             "https://api.pexels.com/videos/search",
-            params={"query": query, "orientation": "landscape",
+            params={"query": query, "orientation": self.shape,
                     "size": "large", "per_page": 15},
             timeout=20,
         )
         r.raise_for_status()
         for v in r.json().get("videos", []):
-            if v.get("width", 0) < 1920 or v.get("height", 0) < 1080:
-                continue
+            if self.shape == "landscape":
+                if v.get("width", 0) < 1920 or v.get("height", 0) < 1080:
+                    continue
+            else:
+                if v.get("width", 0) < 1080 or v.get("height", 0) < 1920:
+                    continue
             cid = str(v["id"])
             if not self.anti.fresh(cid):
                 continue
-            files = [f for f in v["video_files"] if f.get("height", 0) <= 1080]
+            if self.shape == "landscape":
+                files = [f for f in v["video_files"] if f.get("height", 0) <= 1080]
+            else:
+                files = [f for f in v["video_files"] if f.get("height", 0) <= 1920]
             files.sort(key=lambda f: f.get("height", 0), reverse=True)
             if not files:
                 continue

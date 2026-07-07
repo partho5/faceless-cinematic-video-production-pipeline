@@ -15,6 +15,11 @@ class FakeSeg:
     id: str
     text_overlay: str
     audio_path: str = ""
+    tts_scene: str | None = None
+    tts_context: str | None = None
+    tts_delivery: str | None = None
+    pre_silence_ms: int = 0
+    post_silence_ms: int = 0
 
 
 def test_cache_hit_makes_no_api_call(tmp_path, monkeypatch):

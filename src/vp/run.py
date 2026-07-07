@@ -101,7 +101,8 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         voice: str | None = None,
         language: str | None = None,
         subtitle_language: str | None = None,
-        highly_emotional: bool | None = None) -> dict:
+        highly_emotional: bool | None = None,
+        shape: str = "landscape") -> dict:
     cfg = get_config()
     # CLI override for the channel-level emotional-delivery toggle. None
     # means "use config.yaml -> tts.highly_emotional"; True/False mean
@@ -253,7 +254,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     _log(f"master: {master['duration']:.2f}s, {len(master['sfx_events'])} sfx")
 
     # 7. render (all 10 layers) on the mastered track
-    cp = ClipProvider(cfg)
+    cp = ClipProvider(cfg, shape=shape)
     eng = RenderEngine(cfg)
     eng.visual_source = cp.visual_source
     from .fx.ambient import FilmAmbience, KenBurns
@@ -265,7 +266,8 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         eng.register_xform(x)
     info = eng.render(doc, aligns, video_out, preset=preset,
                       work_dir=out / "_work",
-                      audio_track=out / "master.wav")
+                      audio_track=out / "master.wav",
+                      shape=shape)
     _log(f"render -> {video_out.name} {info['resolution']} {info['duration']:.2f}s")
 
     if meta_embed:
@@ -339,6 +341,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="vp.run")
     ap.add_argument("topic")
     ap.add_argument("--preset", choices=["preview", "final"], default="preview")
+    ap.add_argument("--shape", choices=["landscape", "vertical"], default="landscape")
     ap.add_argument("--approve", action="store_true",
                     help="auto-approve the Stage-1 script review gate")
     ap.add_argument("--segments", type=int, default=None,
@@ -393,7 +396,8 @@ def main(argv=None) -> int:
             meta_encoder=a.meta_encoder,
             voice=a.voice, language=a.language,
             subtitle_language=a.subtitle_language,
-            highly_emotional=a.highly_emotional)
+            highly_emotional=a.highly_emotional,
+            shape=a.shape)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

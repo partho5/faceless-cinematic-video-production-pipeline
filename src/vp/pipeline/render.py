@@ -114,11 +114,14 @@ class RenderEngine:
         preset: str = "preview",
         work_dir: Path | None = None,
         audio_track: Path | None = None,
+        shape: str = "landscape",
     ) -> dict:
         import subprocess as _sp
         from moviepy import VideoClip
 
-        p = PRESETS[preset]
+        p = dict(PRESETS[preset])
+        if shape == "vertical":
+            p["w"], p["h"] = p["h"], p["w"]
         work = work_dir or out_path.parent / "_work"
         work.mkdir(parents=True, exist_ok=True)
 
