@@ -27,6 +27,10 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
@@ -1452,6 +1456,24 @@ def _set_window_icon(root: tk.Tk) -> None:
     except Exception:
         pass
 
+def _set_window_icon(root: tk.Tk) -> None:
+    """Loads and sets the window icon safely using an absolute path."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(current_dir, "assets", "icon.png")
+        
+        if os.path.exists(icon_path):
+            icon_image = tk.PhotoImage(file=icon_path)
+            # True means this icon applies to this window and all future popups
+            root.iconphoto(True, icon_image) 
+            root._icon_image = icon_image  # type: ignore
+        else:
+            if _logger:
+                _logger.warning("Icon file missing at path: %s", icon_path)
+    except Exception as e:
+        if _logger:
+            _logger.error("Failed to load window icon: %s", str(e))
+            
 
 def main() -> int:
     import licensing; licensing.enforce()
@@ -1465,7 +1487,10 @@ def main() -> int:
         except Exception:
             pass
     try:
-        root = tk.Tk()
+        app_name = os.environ.get("APP_NAME", "Video Studio")
+        root = tk.Tk(className=app_name)
+        root.title(app_name)
+        
         _set_window_icon(root)
         App(root)
         root.mainloop()
