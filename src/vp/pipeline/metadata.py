@@ -59,6 +59,10 @@ def _chapters_timestamps(doc: ControlDocument) -> list[str]:
     for c in sorted(doc.chapters, key=lambda c: c.start):
         m, s = divmod(int(c.start), 60)
         name = c.chapter_id.replace("_", " ").title()
+        if name == "Hook":
+            name = "Introduction"
+        elif name == "Closing":
+            name = "Conclusion"
         out.append(f"{m:01d}:{s:02d} {name}")
     return out
 
@@ -84,21 +88,23 @@ def _branding_block(b: dict) -> str:
     )
 
 
-_THUMB_RULES = """Thumbnail prompt rules (these are NON-NEGOTIABLE and apply \
-to every video regardless of topic):
-  1. ONE focal subject. A single iconic visual metaphor for the video's \
-core idea. No collage, no multiple objects, no crowd, no split-screen.
-  2. Lots of negative space. Rule-of-thirds. Depth. The eye lands on the \
-subject in under one second at thumbnail size.
-  3. NO text, lettering, captions, logos, watermarks, numbers, or symbols \
-anywhere in the image. Title overlay is added separately later.
-  4. Eye-catching via composition and light, not via clutter or saturation. \
-High contrast against the dominant background tone.
-  5. Premium / cinematic feel. Never a default-AI sheen; specify lens, \
-grain, lighting direction.
-  6. The prompt must be ONE paragraph, 60–120 words, written as a direct \
-image-generation instruction (no preamble like "create a thumbnail that..."). \
-End with the negative-prompt clause spelled out.
+_THUMB_RULES = """Thumbnail prompt rules (NON-NEGOTIABLE, apply to every video):
+  1. ONE character or subject caught mid-action, doing something specific \
+that implies a story or consequence. Show a gesture, reaction, or moment \
+of tension, not a static object or portrait. The action should raise a \
+question in the viewer's mind.
+  2. Simple background, minimal clutter, but the subject can interact with \
+one supporting element (a hand reaching, an object breaking, a face reacting) \
+if it strengthens the story. Rule-of-thirds, clear negative space around \
+the action.
+  3. NO text, lettering, captions, logos, watermarks, numbers, or symbols. \
+Title overlay is added separately later.
+  4. Eye-catching via composition, expression, and light direction, not \
+saturation or clutter. High contrast against the background.
+  5. Cinematic, photoreal feel. Specify lens, angle, and lighting like a \
+film still, not a stock photo.
+  6. Output ONE paragraph, 60–120 words, written as a direct image-generation \
+instruction (no preamble). End with the negative-prompt clause spelled out.
 
 Brand voice to enforce on EVERY prompt:
 {branding_block}"""
@@ -123,14 +129,14 @@ paragraph naturally weaving in 4–6 long-tail keywords from the script; \
 (4) a 1-line CTA inviting like + subscribe + comment. Do NOT include \
 chapter timestamps, music credits, hashtags, or the disclosure line — \
 those are appended by the caller. Plain text only, no markdown.
-  tags : array of 20–30 strings drawn from the script's actual subject \
+  tags : array of 5-7 strings drawn from the script's actual subject \
 matter. Mix broad (single-word, topic-defining) and long-tail (multi-word, \
 search-intent phrases a viewer would type). Each tag ≤ 60 chars. No "#" \
 prefix. Do not invent tags that don't match the video.
-  hashtags : array of 3–5 short hashtags WITHOUT spaces, lowercase, \
+  hashtags : array of 3–4 short hashtags WITHOUT spaces, lowercase, \
 include leading "#". Pick hashtags that match THIS video's topic — not \
 generic channel hashtags. YouTube shows the first 3 above the title.
-  keywords : array of 10–20 short keyword phrases for the video keywords \
+  keywords : array of 5-7 short keyword phrases for the video keywords \
 meta field. Lowercase, no "#". Topic-relevant only.
   thumbnail_prompt : a SINGLE paragraph (60–120 words) to paste into \
 Gemini's free web UI (nano banana / gemini-2.5-flash-image) to generate \
@@ -165,6 +171,22 @@ def _offline_thumbnail_prompt(title: str, branding: dict) -> str:
     )
 
 
+def _clean_description(text: str) -> str:
+    """Replace non-standard Unicode characters like em/en dashes and bullets with ASCII alternatives."""
+    replacements = {
+        "\u2014": "-",  # em dash
+        "\u2013": "-",  # en dash
+        "\u2022": "*",  # bullet point
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
 class MetadataStage:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -184,8 +206,8 @@ class MetadataStage:
             if w not in _STOP and len(w) > 3:
                 freq[w] = freq.get(w, 0) + 1
         ranked = [k for k, _ in sorted(freq.items(), key=lambda x: -x[1])]
-        tags = ranked[:20]
-        keywords = ranked[:15]
+        tags = ranked[:10]
+        keywords = ranked[:5]
         opener = script.strip().split("\n\n")[0][:600]
         body = (
             f"{base} — what most people miss, explained simply.\n\n"
@@ -267,6 +289,7 @@ class MetadataStage:
         music_credit = _load_music_attribution(music_design)
         description = self._compose_description(
             text["description_body"], doc, music_credit, text["hashtags"])
+        description = _clean_description(description)
 
         # YouTube uses BCP-47 primary subtag (e.g. "en", not "en-US") for
         # defaultLanguage. Strip the region if present; default to English.
@@ -276,8 +299,6 @@ class MetadataStage:
             "title": text["title_variants"][0],
             "title_variants": text["title_variants"],
             "description": description,           # publish-ready, full body
-            "description_body": text["description_body"],  # raw SEO body only
-            "description_seo": description,       # alias for upload path
             "tags": text["tags"],
             "hashtags": text["hashtags"],
             "keywords": text["keywords"],

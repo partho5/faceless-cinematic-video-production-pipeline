@@ -42,8 +42,7 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
         # Prefer the publish-ready SEO description (chapters + music credit
         # + disclosure + hashtags assembled by MetadataStage). Fall back to
         # the raw `description` for older metadata.json files.
-        desc = (metadata.get("description_seo")
-                or metadata.get("description", ""))[:4900]
+        desc = (metadata.get("description", ""))[:4900]
         lang = metadata.get("default_language") or "en"
         snippet = {
             "title": metadata.get("title", "")[:100],
