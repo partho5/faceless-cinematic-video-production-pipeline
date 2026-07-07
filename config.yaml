@@ -63,9 +63,8 @@ models:
     voice_name: Leda                    # locked: approved voice
     # AI-Studio-style framing prepended to every chapter (the prompt the
     # user validated). Override per-video via video_meta.tts_scene/tts_context.
-    tts_scene: "A dark psychological documentary narration. Like exposing a system that has been manipulating people in plain sight."
-    tts_context: >-
-      A consumer psychology channel revealing hidden truths about buying behavior. Voice is calm and authoritative — then sharp and loud when exposing a secret the audience never suspected.
+    tts_scene: "Dark psychological documentary narration. The voice speaks like an investigator exposing a system that has been quietly manipulating people in plain sight, revealing what they never noticed was happening to them."
+    tts_context: "This is for a consumer psychology channel that uncovers the hidden mechanics behind buying behavior. Default delivery is fast, confident, and authoritative, like someone who already knows the twist before the audience does. When a hidden manipulation is revealed, the voice sharpens and rises in volume and intensity, landing the reveal like a punch. Tone shifts naturally with the content: anger tightens and hardens the voice, humor loosens it with a wry, knowing edge, excitement speeds it up and lifts the pitch, and serious or somber moments slow it down and drop it lower. Pacing is dynamic throughout, never flat or monotone, always moving with the emotional beat of the script."
     params: { temperature: 1.0 }
 
   # Word-level timing — local, no API. See planning/06.
