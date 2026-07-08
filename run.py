@@ -317,6 +317,22 @@ def _save_render_profile(data: dict) -> None:
 class App:
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
+
+        # Enable Ctrl+A select-all in all input fields
+        def select_all_entry(event):
+            event.widget.select_range(0, 'end')
+            event.widget.icursor('end')
+            return "break"
+
+        def select_all_text(event):
+            event.widget.tag_add("sel", "1.0", "end-1c")
+            return "break"
+
+        for key in ("<Control-Key-a>", "<Control-Key-A>", "<Control-a>", "<Control-A>"):
+            master.bind_class("TEntry", key, select_all_entry)
+            master.bind_class("Entry", key, select_all_entry)
+            master.bind_class("Text", key, select_all_text)
+
         self.proc: subprocess.Popen | None = None
         self.q: queue.Queue[str] = queue.Queue()
         self.last_argv: list[str] = []
