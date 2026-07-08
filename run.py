@@ -223,7 +223,7 @@ def _detect_keys() -> dict[str, bool]:
         return any(present.get(n) for n in names)
 
     return {
-        "Claude · script": has("ANTHROPIC_API_KEY"),
+        "Claude/Groq · script": has("ANTHROPIC_API_KEY", "GROQ_API_KEY"),
         "Gemini · voice": has("GEMINI_API_KEY", "GEMINI_API_KEY_1"),
         "Pexels · footage": has("PEXELS_API_KEY"),
         "YouTube · upload": has("YT_CLIENT_ID") and has("YT_CLIENT_SECRET")
@@ -1300,6 +1300,19 @@ class App:
             "Your Anthropic account has insufficient credits to complete "
             "this request.\n\n"
             "Fix: add credits at console.anthropic.com → Billing",
+        ),
+        "GROQ_KEY_INVALID": (
+            "Groq API Key Invalid",
+            "Your Groq API key was rejected (invalid or expired).\n\n"
+            "Fix:\n"
+            "  1. Open your .env file\n"
+            "  2. Update GROQ_API_KEY with a valid key\n"
+            "  3. Get or rotate keys at: console.groq.com",
+        ),
+        "GROQ_CREDITS": (
+            "Groq Credits/Rate Limit Exceeded",
+            "Your Groq account has insufficient credits or has been rate limited.\n\n"
+            "Fix: check your billing and limits at console.groq.com",
         ),
         "GEMINI_KEY_INVALID": (
             "Gemini API Key Invalid",

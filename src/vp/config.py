@@ -42,7 +42,18 @@ class ModelSpec:
         # local engines never need a key; remote ones need a non-empty key.
         if self.provider in ("local", "frame_compose") or self.provider is None:
             return False
-        return not self.api_key
+        if self.api_key:
+            return False
+        if self.provider == "anthropic":
+            if os.environ.get("GROQ_API_KEY", "").strip():
+                return False
+            try:
+                env = _parse_env_file(ROOT / ".env")
+                if env.get("GROQ_API_KEY", "").strip():
+                    return False
+            except Exception:
+                pass
+        return True
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:

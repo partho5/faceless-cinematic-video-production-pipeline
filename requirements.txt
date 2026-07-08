@@ -9,6 +9,7 @@ opencv-python-headless>=4.9
 
 # --- model/service clients (lazy-imported; only needed when keys present) ---
 anthropic>=0.40            # Stage 1/2 script + control JSON, metadata
+groq>=1.5.0                 # Fallback model provider
 google-genai>=0.8          # Gemini TTS
 google-api-python-client   # YouTube Data API v3 upload
 google-auth-oauthlib       # YouTube OAuth consent helper

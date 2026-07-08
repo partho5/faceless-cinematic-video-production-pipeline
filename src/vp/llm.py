@@ -137,67 +137,223 @@ def _openrouter_text(system: str, user: str) -> tuple[str, str]:
     )
 
 
-def anthropic_message(spec, *, system: str, user: str) -> str:
-    import anthropic
+class GroqUsageWrapper:
+    def __init__(self, usage):
+        self.input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        self.output_tokens = getattr(usage, "completion_tokens", 0) or 0
 
-    client = anthropic.Anthropic(api_key=spec.api_key)
+
+def _groq_text(spec, system: str, user: str) -> tuple[str, str, Any]:
+    """Groq API fallback text generation.
+    Returns (text, model_name, usage_object).
+    """
+    from groq import Groq
+    from .config import get_config
+
+    try:
+        cfg = get_config()
+        groq_api_key = cfg.env("GROQ_API_KEY")
+    except Exception:
+        from .config import ROOT, _parse_env_file
+        env = {**os.environ}
+        env.update(_parse_env_file(ROOT / ".env"))
+        groq_api_key = env.get("GROQ_API_KEY", "")
+
+    if not groq_api_key:
+        raise RuntimeError("GROQ_API_KEY not configured")
+
+    client = Groq(api_key=groq_api_key)
+    model = os.environ.get("GROQ_LLM_MODEL", "qwen/qwen3-32b").strip()
+
     params = dict(spec.params or {})
-    kwargs = dict(
-        model=spec.model,
-        max_tokens=params.get("max_tokens", 4000),
-        system=[{"type": "text", "text": system,
-                 "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user}],
-    )
-    if "temperature" in params:
-        kwargs["temperature"] = params["temperature"]
+    temperature = params.get("temperature", 0.6)
+    # Cap max_tokens for Groq because its TPM rate-limit checks against max_completion_tokens.
+    # Set to 1000 so that sequential attempts can fit within Groq's 6,000 TPM free limit.
+    max_tokens = min(params.get("max_tokens", 4096), 1000)
 
-    # ---------------------------------------------------------------- Anthropic
-    anthropic_exc: Exception | None = None
-    msg = None
+    kwargs = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": temperature,
+        "max_completion_tokens": max_tokens,
+        "top_p": 0.95,
+        "reasoning_effort": "none",
+        "stream": True,
+        "stop": None,
+        "stream_options": {"include_usage": True},
+    }
+
+    completion = None
     try:
         try:
-            msg = client.messages.create(**kwargs)
-        except anthropic.BadRequestError as e:
-            if "temperature" in str(e).lower() and "temperature" in kwargs:
-                kwargs.pop("temperature")
-                msg = client.messages.create(**kwargs)
+            completion = client.chat.completions.create(**kwargs)
+        except Exception as e:
+            # If reasoning_effort or stream_options causes issues, try stripping them
+            err_msg = str(e).lower()
+            changed = False
+            if "stream_options" in err_msg and "stream_options" in kwargs:
+                kwargs.pop("stream_options")
+                changed = True
+            if "reasoning_effort" in err_msg and "reasoning_effort" in kwargs:
+                kwargs.pop("reasoning_effort")
+                changed = True
+            if changed:
+                completion = client.chat.completions.create(**kwargs)
             else:
                 raise
-    except Exception as e:
-        anthropic_exc = e
+    except Exception:
+        # Fallback to absolute minimal standard arguments
+        kwargs_minimal = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": temperature,
+            "max_completion_tokens": max_tokens,
+            "stream": True,
+        }
+        completion = client.chat.completions.create(**kwargs_minimal)
 
-    if anthropic_exc is None:
+    chunks = []
+    usage = None
+    for chunk in completion:
+        if hasattr(chunk, "usage") and chunk.usage is not None:
+            usage = chunk.usage
+        if chunk.choices and len(chunk.choices) > 0:
+            content = chunk.choices[0].delta.content or ""
+            if content:
+                chunks.append(content)
+
+    text = "".join(chunks)
+    if not text:
+        raise ValueError("empty response from Groq")
+
+    return text, model, usage
+
+
+def _clean_think(text: str) -> str:
+    import re
+    if "<think>" in text:
+        if "</think>" in text:
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        else:
+            text = text.split("<think>")[0]
+    return text.strip()
+
+
+def anthropic_message(spec, *, system: str, user: str) -> str:
+    anthropic_exc: Exception | None = None
+    msg = None
+
+    if spec.api_key:
+        import anthropic
+        client = anthropic.Anthropic(api_key=spec.api_key)
+        params = dict(spec.params or {})
+        kwargs = dict(
+            model=spec.model,
+            max_tokens=params.get("max_tokens", 4000),
+            system=[{"type": "text", "text": system,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": user}],
+        )
+        if "temperature" in params:
+            kwargs["temperature"] = params["temperature"]
+
+        try:
+            try:
+                msg = client.messages.create(**kwargs)
+            except anthropic.BadRequestError as e:
+                if "temperature" in str(e).lower() and "temperature" in kwargs:
+                    kwargs.pop("temperature")
+                    msg = client.messages.create(**kwargs)
+                else:
+                    raise
+        except Exception as e:
+            anthropic_exc = e
+
+        if anthropic_exc is None:
+            from .cost import record
+            record(spec.model, getattr(msg, "usage", None),
+                   getattr(spec, "purpose", "llm"))
+            raw_text = "".join(b.text for b in msg.content if b.type == "text")
+            return _clean_think(raw_text)
+    else:
+        # Simulate Anthropic exception since it's not set
+        anthropic_exc = RuntimeError("Anthropic API key is missing (not set in .env)")
+
+    # ---------------------------------------------------------------- Groq fallback
+    groq_exc: Exception | None = None
+    try:
+        from .config import get_config
+        try:
+            cfg = get_config()
+            groq_key = cfg.env("GROQ_API_KEY")
+        except Exception:
+            from .config import ROOT, _parse_env_file
+            env = {**os.environ}
+            env.update(_parse_env_file(ROOT / ".env"))
+            groq_key = env.get("GROQ_API_KEY", "")
+
+        if not groq_key:
+            raise RuntimeError("GROQ_API_KEY not configured")
+
+        if spec.api_key:
+            print(
+                f"[vp] warn: Anthropic failed ({str(anthropic_exc)[:80]}) — retrying via Groq…",
+                flush=True,
+            )
+        else:
+            print(
+                f"[vp] info: Anthropic not configured — attempting via Groq…",
+                flush=True,
+            )
+
+        text, groq_model, usage = _groq_text(spec, system, user)
         from .cost import record
-        record(spec.model, getattr(msg, "usage", None),
-               getattr(spec, "purpose", "llm"))
-        return "".join(b.text for b in msg.content if b.type == "text")
+        usage_obj = GroqUsageWrapper(usage) if usage is not None else None
+        record(groq_model, usage_obj, getattr(spec, "purpose", "llm"))
+        return _clean_think(text)
+    except Exception as e:
+        groq_exc = e
 
     # ---------------------------------------------------------------- OpenRouter fallback
+    if spec.api_key:
+        err_origin = f"Anthropic failed ({str(anthropic_exc)[:60]}) and Groq failed ({str(groq_exc)[:60]})"
+    else:
+        err_origin = f"Groq failed ({str(groq_exc)[:60]})"
+
     print(
-        f"[vp] warn: Anthropic failed ({str(anthropic_exc)[:80]}) — retrying via OpenRouter…",
+        f"[vp] warn: {err_origin} — retrying via OpenRouter…",
         flush=True,
     )
     try:
         text, or_model = _openrouter_text(system, user)
         from .cost import record
         record(or_model, None, getattr(spec, "purpose", "llm"))
-        return text
+        return _clean_think(text)
     except Exception as openrouter_exc:
-        # Both providers failed — log OpenRouter's reason so the user can see
-        # it, then print the specific sentinel for the GUI dialog.
+        # All providers failed — log reasons so the user can see
+        # then print the specific sentinel for the GUI dialog.
         print(
             f"[vp] warn: OpenRouter fallback also failed ({str(openrouter_exc)[:120]})",
             flush=True,
         )
-        _err = str(anthropic_exc)
+        
+        primary_exc = anthropic_exc if spec.api_key else groq_exc
+        _err = str(primary_exc)
         _err_lower = _err.lower()
-        if isinstance(anthropic_exc, anthropic.AuthenticationError):
+        
+        import anthropic
+        if isinstance(primary_exc, anthropic.AuthenticationError):
             print(
                 f"[vp] [API_ERROR:ANTHROPIC_KEY_INVALID] {_err[:200]}",
                 flush=True,
             )
-        elif isinstance(anthropic_exc, anthropic.PermissionDeniedError):
+        elif isinstance(primary_exc, anthropic.PermissionDeniedError):
             etype = (
                 "ANTHROPIC_CREDITS"
                 if any(k in _err_lower
@@ -205,7 +361,7 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
                 else "ANTHROPIC_KEY_INVALID"
             )
             print(f"[vp] [API_ERROR:{etype}] {_err[:200]}", flush=True)
-        elif isinstance(anthropic_exc, anthropic.BadRequestError):
+        elif isinstance(primary_exc, anthropic.BadRequestError):
             if any(k in _err_lower for k in (
                 "credit balance", "billing", "upgrade", "purchase credits",
             )):
@@ -218,12 +374,36 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
                     f"[vp] [API_ERROR:LLM_ALL_FAILED] {_err[:200]}",
                     flush=True,
                 )
+        elif not spec.api_key:
+            try:
+                import groq
+                is_auth_error = isinstance(primary_exc, groq.AuthenticationError)
+                is_rate_error = isinstance(primary_exc, (groq.RateLimitError, groq.PermissionDeniedError))
+            except ImportError:
+                is_auth_error = "authentication" in _err_lower or "api_key" in _err_lower or "unauthorized" in _err_lower
+                is_rate_error = "rate_limit" in _err_lower or "quota" in _err_lower or "credits" in _err_lower
+
+            if is_auth_error:
+                print(
+                    f"[vp] [API_ERROR:GROQ_KEY_INVALID] {_err[:200]}",
+                    flush=True,
+                )
+            elif is_rate_error:
+                print(
+                    f"[vp] [API_ERROR:GROQ_CREDITS] {_err[:200]}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[vp] [API_ERROR:LLM_ALL_FAILED] {_err[:200]}",
+                    flush=True,
+                )
         else:
             print(
                 f"[vp] [API_ERROR:LLM_ALL_FAILED] {_err[:200]}",
                 flush=True,
             )
-        raise anthropic_exc
+        raise primary_exc
 
 
 def tts_framing(spec, topic: str) -> tuple[str, str] | None:
