@@ -1328,9 +1328,11 @@ class App:
             # Aesthetic subtitle fonts (aesthetic quality, cinematic look)
             ("Anton",            "Anton-Regular.ttf",          "Impact-style · punchy caps"),
             ("Inter Bold",       "Inter-Bold.ttf",             "Clean modern sans · good default"),
+            ("Montserrat Bold",  "Montserrat-Bold.ttf",        "Geometric sans · bold weight 700"),
             ("Cormorant",        "Cormorant-Italic.ttf",       "Elegant serif · cinematic"),
             ("Playfair Display", "PlayfairDisplay-Bold.ttf",   "High-contrast editorial"),
             ("Caveat",           "Caveat-Bold.ttf",            "Casual handwritten feel"),
+            ("DejaVu Sans Bold", "DejaVuSans-Bold.ttf",        "Reliable Latin fallback · all platforms"),
             # Noto Sans — guaranteed Unicode fallbacks, also render Latin well
             ("Noto Sans JP",     "NotoSansJP[wght].ttf",       "Universal · Latin + CJK · guaranteed"),
         ]
