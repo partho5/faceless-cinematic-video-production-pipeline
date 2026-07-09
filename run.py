@@ -397,8 +397,8 @@ class App:
         self.topic.insert(0, topic)
         self.preset.set(state.get("preset", "final"))
         self.shape.set(state.get("shape", "landscape"))
-        self.minutes.delete(0, "end")
-        self.minutes.insert(0, state.get("minutes", "6"))
+        self.duration_min.set(int(state.get("duration_min", 6)))
+        self.duration_sec.set(int(state.get("duration_sec", 0)))
         hint = state.get("hint", "")
         self.hint.delete("1.0", "end")
         if hint:
@@ -732,14 +732,21 @@ class App:
                         variable=self.preset, value="preview").grid(
             row=1, column=2, sticky="w", padx=10)
 
-        ttk.Label(o, text="Length (minutes)", style="On.TLabel").grid(
+        ttk.Label(o, text="Length", style="On.TLabel").grid(
             row=2, column=0, sticky="w", pady=4)
-        self.minutes = ttk.Entry(o, width=8)
-        self.minutes.insert(0, "6")
-        self.minutes.grid(row=2, column=1, sticky="w", padx=10, pady=4)
-        ttk.Label(o, text="approximate — the story is written to fit",
-                  style="MutedOn.TLabel").grid(row=2, column=2, columnspan=2,
-                                               sticky="w")
+        _prof_dur = _load_render_profile()
+        self.duration_min = tk.IntVar(value=int(_prof_dur.get("duration_min", 6)))
+        self.duration_sec = tk.IntVar(value=int(_prof_dur.get("duration_sec", 0)))
+        dur_frame = ttk.Frame(o, style="App.TFrame")
+        dur_frame.grid(row=2, column=1, columnspan=2, sticky="w", padx=10, pady=4)
+        ttk.Spinbox(dur_frame, from_=0, to=60, increment=1, width=4,
+                    textvariable=self.duration_min).pack(side="left")
+        ttk.Label(dur_frame, text=" min ", style="On.TLabel").pack(side="left")
+        ttk.Spinbox(dur_frame, values=(0, 10, 20, 30, 40, 50), width=4,
+                    textvariable=self.duration_sec).pack(side="left")
+        ttk.Label(dur_frame, text=" sec", style="On.TLabel").pack(side="left")
+        ttk.Label(dur_frame, text="   approximate — the story is written to fit",
+                  style="MutedOn.TLabel").pack(side="left")
 
         self.upload = tk.BooleanVar(value=False)
         self.review = tk.BooleanVar(value=False)
@@ -1145,14 +1152,15 @@ class App:
             messagebox.showwarning("Missing topic",
                                    "Please enter a Video Topic.")
             return None
-        mins = self.minutes.get().strip() or "6"
-        try:
-            if float(mins) <= 0:
-                raise ValueError
-        except ValueError:
+        dur_min = self.duration_min.get()
+        dur_sec = self.duration_sec.get()
+        total_minutes = dur_min + dur_sec / 60.0
+        if total_minutes <= 0:
             messagebox.showwarning("Bad length",
-                                   "Length must be a positive number.")
+                                   "Length must be at least 10 seconds.\n"
+                                   "Set minutes and/or seconds above zero.")
             return None
+        mins = f"{total_minutes:.6g}"
         argv = [sys.executable, "-m", "vp.run", topic,
                 "--preset", self.preset.get(), "--minutes", mins,
                 "--shape", self.shape.get()]
@@ -1203,6 +1211,8 @@ class App:
             "add_music": self.add_music.get(),
             "highly_emotional": self.highly_emotional.get(),
             "output_dir": self.output_dir_var.get().strip(),
+            "duration_min": self.duration_min.get(),
+            "duration_sec": self.duration_sec.get(),
         })
         argv = self._argv()
         if not argv:
@@ -1258,7 +1268,8 @@ class App:
             "topic": self.topic.get().strip(),
             "preset": self.preset.get(),
             "shape": self.shape.get(),
-            "minutes": self.minutes.get().strip(),
+            "duration_min": self.duration_min.get(),
+            "duration_sec": self.duration_sec.get(),
             "hint": self.hint.get("1.0", "end").strip(),
             "upload": self.upload.get(),
             "review": self.review.get(),

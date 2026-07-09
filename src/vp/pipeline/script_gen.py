@@ -138,13 +138,33 @@ contiguous and the last must equal the target total length."""
 _WPM = 150  # calm spoken pace; words ≈ minutes × WPM
 
 
+def _fmt_duration(minutes: float) -> str:
+    """Return a human-readable duration string for LLM prompts.
+
+    Examples:
+        0.5  -> "about 30 seconds"
+        1.0  -> "about 1 minute"
+        1.5  -> "about 1 minute 30 seconds"
+        6.0  -> "about 6 minutes"
+    """
+    total_sec = round(minutes * 60)
+    m, s = divmod(total_sec, 60)
+    if m == 0:
+        return f"about {s} second{'s' if s != 1 else ''}"
+    m_part = f"{m} minute{'s' if m != 1 else ''}"
+    if s == 0:
+        return f"about {m_part}"
+    s_part = f"{s} second{'s' if s != 1 else ''}"
+    return f"about {m_part} {s_part}"
+
+
 def _script_sys(target_minutes: float) -> str:
     m = max(0.5, float(target_minutes))
     words = int(round(m * _WPM))
     return (
         _SCRIPT_SYS_BASE
         + f" Target ~{_WPM} spoken words per minute. The full narration "
-        f"should run about {m:g} minute(s) read aloud — roughly {words} "
+        f"should run {_fmt_duration(m)} read aloud — roughly {words} "
         f"words. Get close, it need not be exact. Scale the number of "
         f"chapters/beats to fill that length naturally (don't pad or rush)."
     )
