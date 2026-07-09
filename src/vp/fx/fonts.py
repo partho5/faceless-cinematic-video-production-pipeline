@@ -154,16 +154,17 @@ def load_font(personality: str, fonts_map_key: str | None, size: int, text: str 
     _ensure_global_font(global_font)
 
     candidates: list[str] = []
-    if fonts_map_key:
-        candidates.append(str(ASSETS / "fonts" / fonts_map_key))
-    # For Latin/English text, insert the user's preferred aesthetic font
-    # before the system fallback so it wins whenever present.
+    # User's explicit GUI font selection comes first — overrides everything
+    # including personality-mapped fonts. Only applies to Latin/English text.
     if is_latin and _english_font:
         eng_path = ASSETS / "fonts" / _english_font
         if eng_path.exists():
             candidates.append(str(eng_path))
-    # Only use Noto Unicode fonts for scripts that actually need them.
-    # Latin text falls through to DejaVu, then system, then NotoSansJP.
+    # Per-personality font (e.g. Anton for aggressive, Cormorant for whisper).
+    # Used when user hasn't set a global override.
+    if fonts_map_key:
+        candidates.append(str(ASSETS / "fonts" / fonts_map_key))
+    # Noto Unicode fonts only for scripts that actually need them.
     if not is_latin and global_font.exists():
         candidates.append(str(global_font))
     # Bundled DejaVuSans-Bold — downloaded at install time, works on all platforms.
