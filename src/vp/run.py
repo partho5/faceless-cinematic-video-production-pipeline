@@ -102,7 +102,8 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         language: str | None = None,
         subtitle_language: str | None = None,
         highly_emotional: bool | None = None,
-        shape: str = "landscape") -> dict:
+        shape: str = "landscape",
+        output_dir: str | Path | None = None) -> dict:
     cfg = get_config()
     # CLI override for the channel-level emotional-delivery toggle. None
     # means "use config.yaml -> tts.highly_emotional"; True/False mean
@@ -115,7 +116,8 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         _log(f"warn: {w}")
 
     slug = slugify(topic)
-    out = OUTPUT / slug
+    out_base = Path(output_dir) if output_dir else OUTPUT
+    out = out_base / slug
     video_out = out / f"{slug}.mp4"
     (out / "audio").mkdir(parents=True, exist_ok=True)
     _log(f"output dir: {out}")
@@ -138,7 +140,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         _log("review gate: NOT approved. Read the script, then approve to "
              "continue (the GUI shows an Approve button; CLI: create the "
              "file 'script.APPROVED' next to script.md, or pass --approve).")
-        cs = COST.save(out, ledger=OUTPUT / "llm_cost_ledger.jsonl")
+        cs = COST.save(out, ledger=out_base / "llm_cost_ledger.jsonl")
         _log(f"llm cost (so far): ${cs['total_cost_usd']:.4f} "
              f"-> llm_cost.json")
         _log(f"REVIEW_REQUIRED {script_path}")
@@ -328,7 +330,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
                    master_info=master, clip_provenance=cp.manifest,
                    qa=qa, upload=up, script_topic=topic, runtime=runtime)
     _log(f"manifest -> render_manifest.json")
-    cs = COST.save(out, ledger=OUTPUT / "llm_cost_ledger.jsonl")
+    cs = COST.save(out, ledger=out_base / "llm_cost_ledger.jsonl")
     _log(f"llm cost: ${cs['total_cost_usd']:.4f} ({cs['llm_calls']} calls) "
          f"-> llm_cost.json | {cs['context']}")
     _log(f"DONE — deliverable at {video_out}")
@@ -376,6 +378,8 @@ def main(argv=None) -> int:
                     help="BCP-47 code for on-screen subtitle text language; "
                          "defaults to the TTS language when omitted. "
                          "Any translation uses English-prompted LLM calls only.")
+    ap.add_argument("--output-dir", default=None,
+                    help="custom base directory for output videos (defaults to project's output/)")
     he = ap.add_mutually_exclusive_group()
     he.add_argument("--highly-emotional", dest="highly_emotional",
                     action="store_true", default=None,
@@ -397,7 +401,8 @@ def main(argv=None) -> int:
             voice=a.voice, language=a.language,
             subtitle_language=a.subtitle_language,
             highly_emotional=a.highly_emotional,
-            shape=a.shape)
+            shape=a.shape,
+            output_dir=a.output_dir)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

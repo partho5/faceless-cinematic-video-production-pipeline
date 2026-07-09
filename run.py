@@ -756,8 +756,77 @@ class App:
                         ).grid(row=5, column=0, columnspan=3, sticky="w",
                                pady=1)
         o.columnconfigure(2, weight=1)
+        self._build_output_dir_section(p)
         self._build_render_section(p)
         self._build_metadata_section(p)
+
+    def _build_output_dir_section(self, p) -> None:
+        od = self._card(p, "Output Location")
+
+        ttk.Label(od, text="Save Videos To", style="On.TLabel").grid(
+            row=0, column=0, sticky="w", pady=4)
+
+        prof = _load_render_profile()
+        self.output_dir_var = tk.StringVar(value=prof.get("output_dir", ""))
+
+        self.output_dir_entry = ttk.Entry(od, textvariable=self.output_dir_var, width=50)
+        self.output_dir_entry.grid(row=0, column=1, sticky="ew", padx=10, pady=4)
+
+        browse_btn = ttk.Button(od, text="Browse…", style="Ghost.TButton",
+                                command=self.on_browse_output_dir)
+        browse_btn.grid(row=0, column=2, sticky="w", pady=4)
+
+        ttk.Label(od, text="Default: inside the project directory (output/)",
+                  style="MutedOn.TLabel").grid(row=1, column=1, columnspan=2, sticky="w", pady=(0, 2))
+
+        od.columnconfigure(1, weight=1)
+
+    def on_browse_output_dir(self) -> None:
+        import shutil
+        import subprocess
+
+        default_out = str(ROOT / "output")
+        initial_dir = self.output_dir_var.get().strip() or default_out
+        if not Path(initial_dir).exists():
+            initial_dir = default_out
+
+        chosen = ""
+
+        if os.name != "nt":
+            # 1. Try Zenity (modern GTK dialog, standard on Ubuntu/Debian/GNOME)
+            if shutil.which("zenity"):
+                cmd = ["zenity", "--file-selection", "--directory", "--title=Select Output Directory"]
+                if Path(initial_dir).exists():
+                    cmd += [f"--filename={initial_dir}/"]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                if res.returncode == 0:
+                    chosen = res.stdout.strip()
+            # 2. Try Kdialog (modern KDE dialog)
+            elif shutil.which("kdialog"):
+                cmd = ["kdialog", "--getexistingdirectory", initial_dir, "--title", "Select Output Directory"]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                if res.returncode == 0:
+                    chosen = res.stdout.strip()
+
+        # 3. Fallback to native Tkinter dialog (modern native dialog on Windows, fallback on Linux)
+        if not chosen:
+            from tkinter import filedialog
+            chosen = filedialog.askdirectory(
+                parent=self.master,
+                title="Select Output Directory",
+                initialdir=initial_dir
+            )
+
+        if chosen:
+            chosen_path = Path(chosen).resolve()
+            self.output_dir_var.set(str(chosen_path))
+
+            # Save it immediately in the profile so the user doesn't lose it if they quit
+            _save_render_profile({
+                "add_music": self.add_music.get(),
+                "highly_emotional": self.highly_emotional.get(),
+                "output_dir": str(chosen_path),
+            })
 
     def _build_render_section(self, p) -> None:
         r = self._card(p, "Rendering Settings")
@@ -1087,6 +1156,9 @@ class App:
         argv = [sys.executable, "-m", "vp.run", topic,
                 "--preset", self.preset.get(), "--minutes", mins,
                 "--shape", self.shape.get()]
+        out_dir = self.output_dir_var.get().strip()
+        if out_dir:
+            argv += ["--output-dir", out_dir]
         hint = self.hint.get("1.0", "end").strip()
         if hint:
             argv += ["--hint", hint]
@@ -1130,6 +1202,7 @@ class App:
         _save_render_profile({
             "add_music": self.add_music.get(),
             "highly_emotional": self.highly_emotional.get(),
+            "output_dir": self.output_dir_var.get().strip(),
         })
         argv = self._argv()
         if not argv:
