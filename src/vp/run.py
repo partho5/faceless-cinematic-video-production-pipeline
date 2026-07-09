@@ -116,7 +116,13 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     # Apply the user's chosen English subtitle font for this run.
     if english_font:
         from .fx import fonts as _fonts_mod
-        _fonts_mod.set_english_font(english_font)
+        font_file = _fonts_mod.ASSETS / "fonts" / english_font
+        if font_file.exists():
+            _fonts_mod.set_english_font(english_font)
+            _log(f"subtitle font override: {english_font}")
+        else:
+            _log(f"WARNING: chosen font '{english_font}' not found in assets/fonts/ "
+                 f"— falling back to personality fonts. Re-run installer to download fonts.")
     for w in cfg.validate():
         _log(f"warn: {w}")
 

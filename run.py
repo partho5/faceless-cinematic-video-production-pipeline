@@ -1701,8 +1701,9 @@ class App:
         eng_font = getattr(self, "english_font_var", None)
         if eng_font:
             chosen = eng_font.get().strip()
-            font_path = ROOT / "assets" / "fonts" / chosen
-            if chosen and font_path.exists():
+            if chosen:
+                # Always pass the flag; the pipeline subprocess will warn
+                # if the file is missing rather than silently ignoring it.
                 argv += ["--english-font", chosen]
         return argv
 
