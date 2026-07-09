@@ -1,6 +1,7 @@
 # secrets
 .env
 .lic_*
+.yt_token.json
 
 # python
 __pycache__/
