@@ -170,6 +170,12 @@ def load_font(personality: str, fonts_map_key: str | None, size: int, text: str 
     sysf = _system_font_path()
     if sysf:
         candidates.append(sysf)
+    # NotoSansJP is the universal last-resort: it has full Latin + CJK coverage
+    # and is guaranteed present in assets/fonts/ after install on every platform,
+    # so renders never fall through to PIL's tiny bitmap default.
+    noto_jp = ASSETS / "fonts" / "NotoSansJP[wght].ttf"
+    if noto_jp.exists() and str(noto_jp) not in candidates:
+        candidates.append(str(noto_jp))
     for c in candidates:
         try:
             return ImageFont.truetype(c, size)
