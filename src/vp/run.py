@@ -103,7 +103,8 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
         subtitle_language: str | None = None,
         highly_emotional: bool | None = None,
         shape: str = "landscape",
-        output_dir: str | Path | None = None) -> dict:
+        output_dir: str | Path | None = None,
+        english_font: str | None = None) -> dict:
     cfg = get_config()
     # CLI override for the channel-level emotional-delivery toggle. None
     # means "use config.yaml -> tts.highly_emotional"; True/False mean
@@ -112,6 +113,10 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     if highly_emotional is not None:
         cfg._raw.setdefault("tts", {})["highly_emotional"] = bool(
             highly_emotional)
+    # Apply the user's chosen English subtitle font for this run.
+    if english_font:
+        from .fx import fonts as _fonts_mod
+        _fonts_mod.set_english_font(english_font)
     for w in cfg.validate():
         _log(f"warn: {w}")
 
@@ -380,6 +385,10 @@ def main(argv=None) -> int:
                          "Any translation uses English-prompted LLM calls only.")
     ap.add_argument("--output-dir", default=None,
                     help="custom base directory for output videos (defaults to project's output/)")
+    ap.add_argument("--english-font", default=None,
+                    help="filename of the preferred English subtitle font "
+                         "in assets/fonts/ (e.g. Inter-Bold.ttf). Overrides "
+                         "the system/Noto fallback for Latin-script subtitles.")
     he = ap.add_mutually_exclusive_group()
     he.add_argument("--highly-emotional", dest="highly_emotional",
                     action="store_true", default=None,
@@ -402,7 +411,8 @@ def main(argv=None) -> int:
             subtitle_language=a.subtitle_language,
             highly_emotional=a.highly_emotional,
             shape=a.shape,
-            output_dir=a.output_dir)
+            output_dir=a.output_dir,
+            english_font=a.english_font)
     return 0 if r["status"] in ("ok", "awaiting_review") else 1
 
 

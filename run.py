@@ -368,10 +368,13 @@ class App:
         nb.pack(fill="x", pady=(16, 0))
         tab_content = ttk.Frame(nb, style="App.TFrame")
         tab_output = ttk.Frame(nb, style="App.TFrame")
+        tab_advanced = ttk.Frame(nb, style="App.TFrame")
         nb.add(tab_content, text="  Content  ")
         nb.add(tab_output, text="  Output  ")
+        nb.add(tab_advanced, text="  Advanced  ")
         self._build_content(tab_content)
         self._build_output(tab_output)
+        self._build_advanced(tab_advanced)
 
         tk.Frame(body, bg=T.WARN, height=3).pack(fill="x", pady=(14, 12))
         self._build_actions(body)
@@ -987,6 +990,161 @@ class App:
         val = entry.get().strip()
         return "" if val == self._placeholders.get(entry, "\x00") else val
 
+    # -- Advanced tab ----------------------------------------------------------
+    def _build_advanced(self, p) -> None:
+        self._build_font_section(p)
+
+    def _build_font_section(self, p) -> None:
+        """Subtitle font chooser.
+
+        The full catalog is defined below.  At startup the list is filtered
+        to only the entries whose TTF file actually exists in assets/fonts/ —
+        so the UI never shows a font that cannot be used.  All catalog fonts
+        are downloaded by the installer, so after a fresh install every entry
+        will be present.
+        """
+        f = self._card(p, "Subtitle Font (English)")
+
+        # ── Full font catalog ────────────────────────────────────────────────
+        # (display_name, filename, style_hint)
+        # Every filename here is also listed in install.py's font download
+        # step so it is guaranteed to be present after a successful install.
+        _CATALOG: list[tuple[str, str, str]] = [
+            # Aesthetic subtitle fonts (aesthetic quality, cinematic look)
+            ("Anton",            "Anton-Regular.ttf",          "Impact-style · punchy caps"),
+            ("Inter Bold",       "Inter-Bold.ttf",             "Clean modern sans · good default"),
+            ("Cormorant",        "Cormorant-Italic.ttf",       "Elegant serif · cinematic"),
+            ("Playfair Display", "PlayfairDisplay-Bold.ttf",   "High-contrast editorial"),
+            ("Caveat",           "Caveat-Bold.ttf",            "Casual handwritten feel"),
+            # Noto Sans — guaranteed Unicode fallbacks, also render Latin well
+            ("Noto Sans JP",     "NotoSansJP[wght].ttf",       "Universal · Latin + CJK · guaranteed"),
+        ]
+
+        FONTS_DIR = ROOT / "assets" / "fonts"
+        PREVIEW    = "The quick brown fox jumps over the lazy dog."
+
+        # ── Filter: only show fonts whose file is actually on disk ───────────
+        available = [(name, fname, hint)
+                     for (name, fname, hint) in _CATALOG
+                     if (FONTS_DIR / fname).exists()]
+
+        # Keep references to PhotoImages so GC doesn't collect them
+        self._font_preview_imgs: list = []
+
+        if not available:
+            ttk.Label(f,
+                      text="No subtitle fonts found in assets/fonts/. "
+                           "Run the installer to download them.",
+                      style="MutedOn.TLabel").pack(anchor="w", pady=8)
+            return
+
+        # ── Restore saved selection, fall back to first available ────────────
+        _prof = _load_render_profile()
+        saved_font = _prof.get("english_font", "Inter-Bold.ttf")
+        available_fnames = {fname for _, fname, _ in available}
+        if saved_font not in available_fnames:
+            saved_font = available[0][1]   # first in the filtered list
+        self.english_font_var = tk.StringVar(value=saved_font)
+
+        # ── Header row ───────────────────────────────────────────────────────
+        ttk.Label(f, text="Font", style="On.TLabel",
+                  font=self.f_sec).grid(row=0, column=0, sticky="w",
+                                        padx=(0, 10))
+        ttk.Label(f, text="Preview", style="On.TLabel",
+                  font=self.f_sec).grid(row=0, column=1, sticky="w",
+                                        padx=(0, 10))
+        ttk.Label(f, text="Style", style="On.TLabel",
+                  font=self.f_sec).grid(row=0, column=2, sticky="w")
+
+        # ── One row per available font ────────────────────────────────────────
+        for row_i, (display_name, fname, hint) in enumerate(available, start=1):
+            font_path = FONTS_DIR / fname   # guaranteed to exist (filtered above)
+
+            rb = ttk.Radiobutton(
+                f, text=display_name,
+                variable=self.english_font_var, value=fname,
+                style="TRadiobutton",
+                command=self._on_font_select,
+            )
+            rb.grid(row=row_i, column=0, sticky="w", padx=(0, 10), pady=(8, 0))
+
+            # PIL-rendered preview — exact same font the pipeline uses
+            img = self._render_font_preview(font_path, PREVIEW)
+            if img is not None:
+                self._font_preview_imgs.append(img)
+                preview_lbl = tk.Label(f, image=img, bg=T.PANEL,
+                                       anchor="w", cursor="hand2")
+                preview_lbl.bind("<Button-1>", lambda _e, v=fname: (
+                    self.english_font_var.set(v),
+                    self._on_font_select()))
+            else:
+                preview_lbl = ttk.Label(f, text=PREVIEW, style="On.TLabel")
+
+            preview_lbl.grid(row=row_i, column=1, sticky="w",
+                             padx=(0, 20), pady=(8, 0))
+            ttk.Label(f, text=hint, style="MutedOn.TLabel").grid(
+                row=row_i, column=2, sticky="w", pady=(8, 0))
+
+        ttk.Label(
+            f,
+            text="Selected font is used for all English subtitle text.  "
+                 "Non-English scripts (Japanese, Hindi, Bengali …) "
+                 "always use their dedicated Unicode fallback fonts.",
+            style="MutedOn.TLabel",
+            wraplength=680,
+        ).grid(row=len(available) + 1, column=0, columnspan=3,
+               sticky="w", pady=(16, 2))
+
+        f.columnconfigure(1, weight=1)
+
+    # -- PIL-based font preview renderer --------------------------------------
+    @staticmethod
+    def _render_font_preview(font_path: "Path", text: str,
+                             size: int = 17) -> "tk.PhotoImage | None":
+        """Render *text* in the TTF at *font_path* and return a PhotoImage.
+
+        Uses Pillow directly so the preview is always the exact font the
+        pipeline will use — no dependency on system font installation.
+        Returns None on any error so the caller can show a plain text fallback.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont as PILFont
+            import io
+
+            pil_font = PILFont.truetype(str(font_path), size)
+            # Measure bounding box on a dummy image first
+            dummy = Image.new("RGBA", (1, 1))
+            dd = ImageDraw.Draw(dummy)
+            bbox = dd.textbbox((0, 0), text, font=pil_font)
+            w = bbox[2] - bbox[0] + 4
+            h = bbox[3] - bbox[1] + 4
+
+            img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            # Use the panel background fill so it blends with T.PANEL
+            panel_rgb = tuple(int(T.PANEL.lstrip("#")[i:i+2], 16) for i in (0,2,4))
+            img_bg = Image.new("RGBA", (w, h), panel_rgb + (255,))
+            img_bg.paste(img, mask=img)
+
+            d2 = ImageDraw.Draw(img_bg)
+            fg_rgb = tuple(int(T.FG.lstrip("#")[i:i+2], 16) for i in (0,2,4))
+            d2.text((2, 2 - bbox[1]), text, font=pil_font, fill=fg_rgb)
+
+            import base64
+            buf = io.BytesIO()
+            img_bg.save(buf, format="PNG")
+            buf.seek(0)
+            photo = tk.PhotoImage(data=base64.b64encode(buf.read()))
+            return photo
+        except Exception:
+            return None
+
+    def _on_font_select(self) -> None:
+        """Persist the chosen English subtitle font to the render profile."""
+        prof = _load_render_profile()
+        prof["english_font"] = self.english_font_var.get()
+        _save_render_profile(prof)
+
     def _build_actions(self, p) -> None:
         bar = ttk.Frame(p, style="App.TFrame")
         bar.pack(fill="x")
@@ -1223,6 +1381,12 @@ class App:
             sub_code = _LANG_LABEL_TO_CODE.get(sub_label, "")
             if sub_code:
                 argv += ["--subtitle-language", sub_code]
+        eng_font = getattr(self, "english_font_var", None)
+        if eng_font:
+            chosen = eng_font.get().strip()
+            font_path = ROOT / "assets" / "fonts" / chosen
+            if chosen and font_path.exists():
+                argv += ["--english-font", chosen]
         return argv
 
     # -- run ---------------------------------------------------------------
@@ -1242,6 +1406,8 @@ class App:
             "output_dir": self.output_dir_var.get().strip(),
             "duration_min": self.duration_min.get(),
             "duration_sec": self.duration_sec.get(),
+            "english_font": getattr(self, "english_font_var",
+                                    tk.StringVar()).get(),
         })
         argv = self._argv()
         if not argv:

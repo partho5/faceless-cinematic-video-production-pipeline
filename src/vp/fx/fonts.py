@@ -43,6 +43,23 @@ _GLOB_ROOTS = {
     "darwin": "/System/Library/Fonts/**/*.tt[fc]",
 }
 
+# Module-level preferred English/Latin font.  Set once per run by
+# set_english_font() when the user chooses a font in the GUI; None means
+# use the pipeline default (system font → Noto-JP fallback).
+_english_font: str | None = None
+
+
+def set_english_font(filename: str) -> None:
+    """Set the preferred English subtitle font for this process.
+
+    ``filename`` is the basename of a TTF in assets/fonts/, e.g.
+    ``"Inter-Bold.ttf"``.  Clears the load_font() LRU cache so every
+    subsequent call uses the new preference.
+    """
+    global _english_font
+    _english_font = filename
+    load_font.cache_clear()
+
 
 def _plat() -> str:
     if sys.platform.startswith("win"):
@@ -95,10 +112,35 @@ def _ensure_global_font(path: Path) -> None:
         print(f"[vp] Warning: failed to download global font: {e}", flush=True)
 
 
+def _is_latin_only(text: str | None) -> bool:
+    """Return True when *text* contains no non-Latin Unicode characters that
+    require a dedicated fallback font (Devanagari, Bengali, CJK, etc.)."""
+    if not text:
+        return True
+    for char in text:
+        cp = ord(char)
+        # Devanagari
+        if 0x0900 <= cp <= 0x097F:
+            return False
+        # Bengali
+        if 0x0980 <= cp <= 0x09FF:
+            return False
+        # CJK Unified Ideographs and common extension blocks
+        if 0x4E00 <= cp <= 0x9FFF:
+            return False
+        if 0x3000 <= cp <= 0x303F:  # CJK Symbols & Punctuation
+            return False
+        if 0x3040 <= cp <= 0x30FF:  # Hiragana + Katakana
+            return False
+    return True
+
+
 @lru_cache(maxsize=128)
 def load_font(personality: str, fonts_map_key: str | None, size: int, text: str | None = None) -> ImageFont.FreeTypeFont:
     font_name = "NotoSansJP[wght].ttf"  # Default global fallback CJK/Latin
-    if text:
+    is_latin = _is_latin_only(text)
+
+    if text and not is_latin:
         for char in text:
             cp = ord(char)
             if 0x0900 <= cp <= 0x097F:
@@ -114,6 +156,12 @@ def load_font(personality: str, fonts_map_key: str | None, size: int, text: str 
     candidates: list[str] = []
     if fonts_map_key:
         candidates.append(str(ASSETS / "fonts" / fonts_map_key))
+    # For Latin/English text, insert the user's preferred aesthetic font
+    # before the Noto fallback so it wins whenever present.
+    if is_latin and _english_font:
+        eng_path = ASSETS / "fonts" / _english_font
+        if eng_path.exists():
+            candidates.append(str(eng_path))
     if global_font.exists():
         candidates.append(str(global_font))
     sysf = _system_font_path()

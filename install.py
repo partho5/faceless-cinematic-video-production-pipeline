@@ -478,13 +478,27 @@ def audit(args) -> Report:
         else:
             r.add(name, WARN_, "missing", "no example to scaffold from")
 
-    # global fonts
-    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
-    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
+    # ── Font catalog (must stay in sync with run.py _build_font_section) ──
+    # All fonts in this table are attempted at install time.
+    # Noto fonts: mandatory for non-Latin script rendering.
+    # Aesthetic fonts: best-effort; failure = warn, not fatal.
+    ALL_FONT_NAMES = [
+        "NotoSansJP[wght].ttf",
+        "NotoSansDevanagari[wdth,wght].ttf",
+        "NotoSansBengali[wdth,wght].ttf",
+        "Anton-Regular.ttf",
+        "Inter-Bold.ttf",
+        "Cormorant-Italic.ttf",
+        "PlayfairDisplay-Bold.ttf",
+        "Caveat-Bold.ttf",
+    ]
+    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in ALL_FONT_NAMES)
     if fonts_exist:
-        r.add("global unicode fonts", OK, "present")
+        r.add("subtitle fonts", OK, "all present")
     else:
-        r.add("global unicode fonts", MISSING, "not found", "will download global Unicode fonts")
+        missing = [f for f in ALL_FONT_NAMES if not (ROOT / "assets" / "fonts" / f).exists()]
+        r.add("subtitle fonts", MISSING, f"{len(missing)} missing",
+              f"will download: {', '.join(missing)}")
 
     say("")
     say(f"  {Con.BOLD}Audit result: {r.worst()}{Con.X}")
@@ -678,10 +692,22 @@ def execute(r: Report, args) -> int:
         steps.append(("whisper model prefetch", 3.0, "model"))
     steps.append(("editable install (vp)", 1.0, "editable"))
 
-    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
-    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
-    if not fonts_exist and not args.offline:
-        steps.append(("global unicode fonts", 1.5, "font"))
+    # ── Font catalog — same list the GUI chooser uses ─────────────────────
+    # Noto fonts are fatal-required; aesthetic fonts are best-effort.
+    ALL_FONT_NAMES = [
+        "NotoSansJP[wght].ttf",
+        "NotoSansDevanagari[wdth,wght].ttf",
+        "NotoSansBengali[wdth,wght].ttf",
+        "Anton-Regular.ttf",
+        "Inter-Bold.ttf",
+        "Cormorant-Italic.ttf",
+        "PlayfairDisplay-Bold.ttf",
+        "Caveat-Bold.ttf",
+    ]
+    fonts_any_missing = any(
+        not (ROOT / "assets" / "fonts" / f).exists() for f in ALL_FONT_NAMES)
+    if fonts_any_missing and not args.offline:
+        steps.append(("subtitle fonts", 3.0, "all_fonts"))
 
     steps.append(("project config", 0.5, "config"))
 
@@ -745,23 +771,44 @@ def execute(r: Report, args) -> int:
             prog.finish(Con.OK if rc else Con.WARN)
             warned = warned or not rc
 
-        elif kind == "font":
-            urls = {
-                "NotoSansJP[wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
-                "NotoSansDevanagari[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
-                "NotoSansBengali[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
+        elif kind == "all_fonts":
+            # ── Unified font download ──────────────────────────────────────
+            # All URLs use raw.githubusercontent.com (direct CDN) — avoids
+            # GitHub HTML 429 rate-limits that happen with github.com/raw.
+            FONT_URLS = {
+                # Noto Unicode fallbacks — FATAL if they fail
+                "NotoSansJP[wght].ttf":              "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
+                "NotoSansDevanagari[wdth,wght].ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
+                "NotoSansBengali[wdth,wght].ttf":    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
+                # Aesthetic subtitle fonts — WARN on failure (non-fatal)
+                "Anton-Regular.ttf":        "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
+                "Inter-Bold.ttf":           "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+                "Cormorant-Italic.ttf":     "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorant/Cormorant-Italic%5Bwght%5D.ttf",
+                "PlayfairDisplay-Bold.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf",
+                "Caveat-Bold.ttf":          "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
             }
-            ok = True
-            for fname, url in urls.items():
+            NOTO_REQUIRED = {"NotoSansJP[wght].ttf",
+                             "NotoSansDevanagari[wdth,wght].ttf",
+                             "NotoSansBengali[wdth,wght].ttf"}
+            fatal_fail = False
+            for fname, url in FONT_URLS.items():
                 dest = ROOT / "assets" / "fonts" / fname
-                if not dest.exists():
-                    prog.update(0.1, f"downloading {fname}…")
-                    if not download(url, dest, prog):
-                        ok = False
-                        break
-            prog.finish(Con.OK if ok else Con.BAD)
-            if not ok:
-                warned = True
+                if dest.exists():
+                    continue
+                prog.update(0.1, f"downloading {fname}…")
+                ok_dl = download(url, dest, prog)
+                if not ok_dl:
+                    if fname in NOTO_REQUIRED:
+                        fatal_fail = True
+                        log(f"FATAL: required font {fname} failed to download", "ERROR")
+                    else:
+                        warned = True
+                        log(f"optional font {fname} failed — will be absent from chooser", "WARN")
+            prog.finish(Con.BAD if fatal_fail else Con.OK)
+            if fatal_fail:
+                say(f"\n{Con.R}FATAL: one or more required Unicode fonts could not be "
+                    f"downloaded. Check your internet connection and re-run.{Con.X}")
+                return EXIT_FIXABLE
 
         elif kind == "config":
             made = scaffold_config()
@@ -808,12 +855,24 @@ def verify(args) -> tuple[bool, list[str]]:
         notes.append("ffmpeg not callable from PATH (open a new shell)")
     say(f"  {Con.OK if rc==0 else Con.BAD} ffmpeg")
 
-    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
-    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
-    say(f"  {Con.OK if fonts_exist else Con.BAD} global unicode fonts")
-    if not fonts_exist:
-        notes.append("One or more global Unicode fonts are missing")
+    # \u2500\u2500 Unified font catalog check (same list as installer + GUI chooser) \u2500\u2500
+    NOTO_REQUIRED = ["NotoSansJP[wght].ttf",
+                     "NotoSansDevanagari[wdth,wght].ttf",
+                     "NotoSansBengali[wdth,wght].ttf"]
+    AESTHETIC = ["Anton-Regular.ttf", "Inter-Bold.ttf",
+                 "Cormorant-Italic.ttf", "PlayfairDisplay-Bold.ttf",
+                 "Caveat-Bold.ttf"]
+    noto_ok = all((ROOT / "assets" / "fonts" / f).exists() for f in NOTO_REQUIRED)
+    aes_ok  = all((ROOT / "assets" / "fonts" / f).exists() for f in AESTHETIC)
+    say(f"  {Con.OK if noto_ok else Con.BAD} Unicode fonts (Noto — required)")
+    say(f"  {Con.OK if aes_ok  else Con.WARN} aesthetic subtitle fonts")
+    if not noto_ok:
+        notes.append("One or more required Noto Unicode fonts are missing — re-run installer")
         ok = False
+    if not aes_ok:
+        missing_a = [f for f in AESTHETIC if not (ROOT / "assets" / "fonts" / f).exists()]
+        notes.append(f"Aesthetic fonts missing (non-fatal): {', '.join(missing_a)}")
+
 
     rc, _, _ = run([str(vp), "-c", "import tkinter"])
     say(f"  {Con.OK if rc==0 else Con.WARN} tkinter (GUI)")
