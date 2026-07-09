@@ -992,6 +992,13 @@ class App:
         self.run_btn = ttk.Button(bar, text="Create Video",
                                   style="Accent.TButton", command=self.on_run)
         self.run_btn.pack(side="left")
+        # «Open Script Folder» sits left of Approve & Continue;
+        # both are hidden until the pipeline pauses for review.
+        self.open_script_btn = ttk.Button(
+            bar, text="📂 Open Script Folder",
+            style="Ghost.TButton",
+            command=self.on_open_script_folder)
+        # packed dynamically when review is pending
         self.approve_btn = ttk.Button(bar, text="Approve & Continue",
                                       style="Ghost.TButton",
                                       command=self.on_approve,
@@ -1247,6 +1254,25 @@ class App:
         else:
             subprocess.Popen(["xdg-open", str(self.out_dir)])
 
+    def on_open_script_folder(self) -> None:
+        """Open the folder that contains the review script in the OS file manager."""
+        if not self.review_script:
+            messagebox.showwarning(
+                "Not available", "No script is awaiting review yet.")
+            return
+        folder = self.review_script.parent
+        if not folder.exists():
+            messagebox.showwarning(
+                "Not found", f"Folder not found:\n{folder}")
+            return
+        if os.name == "nt":
+            # On Windows, open Explorer and select the file so it's highlighted
+            subprocess.Popen(["explorer", f"/select,{self.review_script}"])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+
     def on_approve(self) -> None:
         if not (self.out_dir and self.review_script):
             messagebox.showwarning(
@@ -1260,6 +1286,8 @@ class App:
             return
         self.review_pending = False
         self.approve_btn.configure(state="disabled")
+        # Hide the script-folder shortcut now that approval is done
+        self.open_script_btn.pack_forget()
         self._append("\n--- approved; continuing ---\n")
         self._launch(self.last_argv)
 
@@ -1343,6 +1371,9 @@ class App:
         if self.review_pending and self.review_script \
                 and self.review_script.exists():
             self.approve_btn.configure(state="normal")
+            # Show «Open Script Folder» to the left of «Approve & Continue»
+            self.open_script_btn.pack(
+                side="left", padx=(10, 0), after=self.run_btn)
             self._append(
                 "\n================ STORY FOR YOUR REVIEW ================\n")
             try:

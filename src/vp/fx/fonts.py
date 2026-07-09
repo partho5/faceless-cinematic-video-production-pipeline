@@ -72,11 +72,50 @@ def _system_font_path() -> str | None:
     return hits[0] if hits else None
 
 
+def _ensure_global_font(path: Path) -> None:
+    if path.exists():
+        return
+    import urllib.request
+    try:
+        urls = {
+            "NotoSansJP[wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
+            "NotoSansDevanagari[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
+            "NotoSansBengali[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
+        }
+        url = urls.get(path.name)
+        if not url:
+            return
+        print(f"[vp] Downloading global Unicode font fallback to {path.name}...", flush=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(path.name + ".tmp")
+        urllib.request.urlretrieve(url, str(tmp_path))
+        tmp_path.replace(path)
+        print(f"[vp] Download complete: {path.name}", flush=True)
+    except Exception as e:
+        print(f"[vp] Warning: failed to download global font: {e}", flush=True)
+
+
 @lru_cache(maxsize=128)
-def load_font(personality: str, fonts_map_key: str | None, size: int) -> ImageFont.FreeTypeFont:
+def load_font(personality: str, fonts_map_key: str | None, size: int, text: str | None = None) -> ImageFont.FreeTypeFont:
+    font_name = "NotoSansJP[wght].ttf"  # Default global fallback CJK/Latin
+    if text:
+        for char in text:
+            cp = ord(char)
+            if 0x0900 <= cp <= 0x097F:
+                font_name = "NotoSansDevanagari[wdth,wght].ttf"
+                break
+            elif 0x0980 <= cp <= 0x09FF:
+                font_name = "NotoSansBengali[wdth,wght].ttf"
+                break
+
+    global_font = ASSETS / "fonts" / font_name
+    _ensure_global_font(global_font)
+
     candidates: list[str] = []
     if fonts_map_key:
         candidates.append(str(ASSETS / "fonts" / fonts_map_key))
+    if global_font.exists():
+        candidates.append(str(global_font))
     sysf = _system_font_path()
     if sysf:
         candidates.append(sysf)

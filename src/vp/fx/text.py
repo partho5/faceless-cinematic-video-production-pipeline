@@ -56,7 +56,7 @@ class TextRenderer:
 
         fonts_key = ctx.doc.global_assets.get("fonts", {}).get(seg.text_personality)
         size = max(20, int(ctx.h * 0.072))
-        font = load_font(seg.text_personality, fonts_key, size)
+        font = load_font(seg.text_personality, fonts_key, size, raw)
 
         # word timings from alignment (fallback: proportional)
         al = ctx.alignments.get(seg.id)
@@ -132,7 +132,7 @@ class TextRenderer:
         d = ImageDraw.Draw(overlay)
         fonts_key = ctx.doc.global_assets.get("fonts", {}).get(seg.text_personality)
         size = max(20, int(ctx.h * 0.072))
-        font = load_font(seg.text_personality, fonts_key, size)
+        font = load_font(seg.text_personality, fonts_key, size, seg.text_overlay)
 
         # exit fade (last 0.4s) — covers fade/flash/shrink/hard variants
         out_a = 1.0
@@ -212,7 +212,7 @@ class TextRenderer:
             fs = font
             if scale != 1.0:
                 fs = load_font(seg.text_personality, fonts_key,
-                               int(size * scale))
+                               int(size * scale), seg.text_overlay)
             x = w.x + dx + out_dx
             y = w.y + dy + out_dy
             font_size = int(size * scale)

@@ -478,6 +478,14 @@ def audit(args) -> Report:
         else:
             r.add(name, WARN_, "missing", "no example to scaffold from")
 
+    # global fonts
+    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
+    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
+    if fonts_exist:
+        r.add("global unicode fonts", OK, "present")
+    else:
+        r.add("global unicode fonts", MISSING, "not found", "will download global Unicode fonts")
+
     say("")
     say(f"  {Con.BOLD}Audit result: {r.worst()}{Con.X}")
     return r
@@ -669,6 +677,12 @@ def execute(r: Report, args) -> int:
         steps.append(("precise alignment (torch)", 10.0, "heavy"))
         steps.append(("whisper model prefetch", 3.0, "model"))
     steps.append(("editable install (vp)", 1.0, "editable"))
+
+    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
+    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
+    if not fonts_exist and not args.offline:
+        steps.append(("global unicode fonts", 1.5, "font"))
+
     steps.append(("project config", 0.5, "config"))
 
     prog = Progress(sum(w for _, w, _ in steps))
@@ -731,6 +745,24 @@ def execute(r: Report, args) -> int:
             prog.finish(Con.OK if rc else Con.WARN)
             warned = warned or not rc
 
+        elif kind == "font":
+            urls = {
+                "NotoSansJP[wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
+                "NotoSansDevanagari[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
+                "NotoSansBengali[wdth,wght].ttf": "https://github.com/google/fonts/raw/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
+            }
+            ok = True
+            for fname, url in urls.items():
+                dest = ROOT / "assets" / "fonts" / fname
+                if not dest.exists():
+                    prog.update(0.1, f"downloading {fname}…")
+                    if not download(url, dest, prog):
+                        ok = False
+                        break
+            prog.finish(Con.OK if ok else Con.BAD)
+            if not ok:
+                warned = True
+
         elif kind == "config":
             made = scaffold_config()
             prog.update(1.0, f"created {', '.join(made)}" if made
@@ -775,6 +807,13 @@ def verify(args) -> tuple[bool, list[str]]:
     if rc != 0:
         notes.append("ffmpeg not callable from PATH (open a new shell)")
     say(f"  {Con.OK if rc==0 else Con.BAD} ffmpeg")
+
+    font_names = ["NotoSansJP[wght].ttf", "NotoSansDevanagari[wdth,wght].ttf", "NotoSansBengali[wdth,wght].ttf"]
+    fonts_exist = all((ROOT / "assets" / "fonts" / f).exists() for f in font_names)
+    say(f"  {Con.OK if fonts_exist else Con.BAD} global unicode fonts")
+    if not fonts_exist:
+        notes.append("One or more global Unicode fonts are missing")
+        ok = False
 
     rc, _, _ = run([str(vp), "-c", "import tkinter"])
     say(f"  {Con.OK if rc==0 else Con.WARN} tkinter (GUI)")
