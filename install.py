@@ -486,8 +486,10 @@ def audit(args) -> Report:
         "NotoSansJP[wght].ttf",
         "NotoSansDevanagari[wdth,wght].ttf",
         "NotoSansBengali[wdth,wght].ttf",
+        "DejaVuSans-Bold.ttf",
         "Anton-Regular.ttf",
         "Inter-Bold.ttf",
+        "Montserrat-Bold.ttf",
         "Cormorant-Italic.ttf",
         "PlayfairDisplay-Bold.ttf",
         "Caveat-Bold.ttf",
@@ -698,8 +700,10 @@ def execute(r: Report, args) -> int:
         "NotoSansJP[wght].ttf",
         "NotoSansDevanagari[wdth,wght].ttf",
         "NotoSansBengali[wdth,wght].ttf",
+        "DejaVuSans-Bold.ttf",
         "Anton-Regular.ttf",
         "Inter-Bold.ttf",
+        "Montserrat-Bold.ttf",
         "Cormorant-Italic.ttf",
         "PlayfairDisplay-Bold.ttf",
         "Caveat-Bold.ttf",
@@ -780,9 +784,12 @@ def execute(r: Report, args) -> int:
                 "NotoSansJP[wght].ttf":              "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
                 "NotoSansDevanagari[wdth,wght].ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
                 "NotoSansBengali[wdth,wght].ttf":    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
+                # DejaVu — bundled Latin fallback, guaranteed on all platforms
+                "DejaVuSans-Bold.ttf":      "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
                 # Aesthetic subtitle fonts — WARN on failure (non-fatal)
                 "Anton-Regular.ttf":        "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
                 "Inter-Bold.ttf":           "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+                "Montserrat-Bold.ttf":      "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf",
                 "Cormorant-Italic.ttf":     "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorant/Cormorant-Italic%5Bwght%5D.ttf",
                 "PlayfairDisplay-Bold.ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf",
                 "Caveat-Bold.ttf":          "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
@@ -860,8 +867,8 @@ def verify(args) -> tuple[bool, list[str]]:
                      "NotoSansDevanagari[wdth,wght].ttf",
                      "NotoSansBengali[wdth,wght].ttf"]
     AESTHETIC = ["Anton-Regular.ttf", "Inter-Bold.ttf",
-                 "Cormorant-Italic.ttf", "PlayfairDisplay-Bold.ttf",
-                 "Caveat-Bold.ttf"]
+                 "Montserrat-Bold.ttf", "Cormorant-Italic.ttf",
+                 "PlayfairDisplay-Bold.ttf", "Caveat-Bold.ttf"]
     noto_ok = all((ROOT / "assets" / "fonts" / f).exists() for f in NOTO_REQUIRED)
     aes_ok  = all((ROOT / "assets" / "fonts" / f).exists() for f in AESTHETIC)
     say(f"  {Con.OK if noto_ok else Con.BAD} Unicode fonts (Noto — required)")

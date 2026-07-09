@@ -163,16 +163,19 @@ def load_font(personality: str, fonts_map_key: str | None, size: int, text: str 
         if eng_path.exists():
             candidates.append(str(eng_path))
     # Only use Noto Unicode fonts for scripts that actually need them.
-    # Latin text falls back to the system bold font (DejaVu, Arial, etc.)
-    # to preserve the pre-Unicode-patch visual style.
+    # Latin text falls through to DejaVu, then system, then NotoSansJP.
     if not is_latin and global_font.exists():
         candidates.append(str(global_font))
+    # Bundled DejaVuSans-Bold — downloaded at install time, works on all platforms.
+    dejavu = ASSETS / "fonts" / "DejaVuSans-Bold.ttf"
+    if dejavu.exists():
+        candidates.append(str(dejavu))
+    # System font as secondary OS fallback (DejaVu system copy, Arial, etc.)
     sysf = _system_font_path()
     if sysf:
         candidates.append(sysf)
-    # NotoSansJP is the universal last-resort: it has full Latin + CJK coverage
-    # and is guaranteed present in assets/fonts/ after install on every platform,
-    # so renders never fall through to PIL's tiny bitmap default.
+    # NotoSansJP is the universal last-resort: full Latin + CJK coverage,
+    # guaranteed present in assets/fonts/ after install on every platform.
     noto_jp = ASSETS / "fonts" / "NotoSansJP[wght].ttf"
     if noto_jp.exists() and str(noto_jp) not in candidates:
         candidates.append(str(noto_jp))
