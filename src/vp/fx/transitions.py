@@ -100,15 +100,24 @@ def _xfade_two(
 ) -> bool:
     """Merge clip_a + clip_b with an xfade transition into `out`.
 
-    The transition window is at the tail of clip_a / head of clip_b.
+    Duration-preserving design:
+      clip_a's last frame is frozen for `duration` seconds via tpad.
+      The xfade consumes ONLY that frozen padding — no real content from
+      either clip is overlapped or removed.
+
+      Output duration = dur_a + dur_b  (not dur_a + dur_b - duration).
+      This guarantees video stays in sync with the audio track across
+      any number of clips.
+
     Returns True on success, False on ffmpeg error (caller falls back).
     """
     dur_a = _get_duration(clip_a)
-    if dur_a <= duration:
-        # clip too short to transition — hard cut fallback
+    if dur_a <= 0.1:
         return False
 
-    offset = round(dur_a - duration, 4)
+    # offset = real end of clip_a — the xfade starts exactly there,
+    # blending into clip_b while clip_a shows its frozen last frame.
+    offset = round(dur_a, 4)
 
     cmd = [
         "ffmpeg", "-y",
@@ -116,7 +125,10 @@ def _xfade_two(
         "-i", str(clip_b),
         "-filter_complex",
         (
-            f"[0:v][1:v]xfade="
+            # Step 1: freeze clip_a's last frame for `duration` seconds
+            f"[0:v]tpad=stop_duration={duration}:stop_mode=clone[padded];"
+            # Step 2: xfade the padded clip into clip_b at the freeze point
+            f"[padded][1:v]xfade="
             f"transition={effect}:"
             f"duration={duration}:"
             f"offset={offset}"
