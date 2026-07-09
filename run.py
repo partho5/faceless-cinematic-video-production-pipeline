@@ -171,26 +171,27 @@ class T:
 # progress milestones: substring found in a streamed line -> percent.
 # (kept in order; the bar never moves backwards)
 _MILESTONES: list[tuple[str, int, str]] = [
-    ("output dir:", 3, "Preparing workspace…"),
-    ("stage1: writing", 6, "Writing the script…"),
-    ("stage1: reusing approved", 10, "Reusing approved script…"),
-    ("stage1: offline", 8, "Script (offline sample)…"),
-    ("stage1 script ->", 12, "Script ready"),
-    ("stage2: segmenting", 16, "Directing scene segments…"),
-    ("stage2 doc:", 45, "Segments validated"),
-    ("voice framing:", 48, "Deriving voice style…"),
-    ("voice:", 60, "Voiceover synthesized"),
-    ("timeline reflowed", 64, "Timeline built"),
-    ("sound design:", 66, "Designing sound…"),
-    ("master:", 68, "Mastering audio…"),
-    ("render ->", 90, "Render complete"),
-    ("metadata:", 93, "Thumbnail + metadata…"),
-    ("QA passed", 96, "Quality checks…"),
-    ("manifest ->", 98, "Writing manifest…"),
-    ("llm cost", 99, "Cost report saved"),
+    ("output dir:", 1, "Preparing workspace…"),
+    ("stage1: writing", 2, "Writing the script…"),
+    ("stage1: reusing approved", 3, "Reusing approved script…"),
+    ("stage1: offline", 2, "Script (offline sample)…"),
+    ("stage1 script ->", 4, "Script ready"),
+    ("stage2: segmenting", 6, "Directing scene segments…"),
+    ("stage2 doc:", 8, "Segments validated"),
+    ("voice framing:", 9, "Deriving voice style…"),
+    ("voice:", 12, "Voiceover synthesized"),
+    ("timeline reflowed", 13, "Timeline built"),
+    ("sound design:", 14, "Designing sound…"),
+    ("master:", 15, "Mastering audio…"),
+    ("render ->", 95, "Render complete"),
+    ("metadata:", 97, "Thumbnail + metadata…"),
+    ("QA passed", 98, "Quality checks…"),
+    ("manifest ->", 99, "Writing manifest…"),
+    ("llm cost:", 99, "Cost report saved"),
     ("DONE", 100, "Finished"),
 ]
 _RE_CHAPTER = re.compile(r"stage2: chapter (\d+)/(\d+)")
+_RE_RENDER_SEG = re.compile(r"rendering segment (\d+)/(\d+)")
 
 
 def _app_name() -> str:
@@ -340,6 +341,7 @@ class App:
         self.video_path: Path | None = None
         self.review_script: Path | None = None
         self.review_pending = False
+        self.total_segments = 10
         self._resuming = False
         self._pct = 0          # logical target %
         self._disp = 0         # currently displayed % (animated toward target)
@@ -1123,23 +1125,43 @@ class App:
         if "REVIEW_REQUIRED " in s:
             self.review_script = Path(s.split("REVIEW_REQUIRED ", 1)[1].strip())
             self.review_pending = True
-            self._set_pct(12, "Awaiting your review")
+            self._set_pct(4, "Awaiting your review…")
             return
+        # Parse total segment count from stage2 doc line
+        if "stage2 doc:" in s:
+            try:
+                self.total_segments = int(
+                    s.split("stage2 doc:", 1)[1].strip().split()[0])
+            except Exception:
+                pass
+        # Incremental rendering progress (15% – 95%) based on emitted segment logs
+        m_seg = _RE_RENDER_SEG.search(s)
+        if m_seg:
+            i, n = int(m_seg.group(1)), max(1, int(m_seg.group(2)))
+            pct = 15 + int(80 * i / n)
+            self._set_pct(pct, f"Rendering segment {i}/{n}…")
+            # gently creep toward next segment target so bar never looks frozen
+            if i < n:
+                next_pct = 15 + int(80 * (i + 1) / n)
+                self._creep(next_pct - 1, period=10_000)
+            return
+        # Directing chapters: scale 6% – 8%
         m = _RE_CHAPTER.search(s)
         if m:
             i, n = int(m.group(1)), max(1, int(m.group(2)))
-            self._set_pct(16 + int(26 * i / n),
+            self._set_pct(6 + int(2 * i / n),
                           f"Directing chapter {i}/{n}…")
             return
         for needle, pct, stage in _MILESTONES:
             if needle in s:
                 self._set_pct(pct, stage)
-                # render is the long, log-silent step: creep the % up
-                # gently (≈68 -> 89) instead of freezing until it returns
                 if needle == "master:":
+                    # Creep gently up to just before the first segment tick
+                    # so the bar moves but never overshoots real progress
+                    first_seg_pct = 15 + int(80 / max(1, self.total_segments))
                     self.stage_lbl.configure(
                         text="Rendering 1080p — longest step…")
-                    self._creep(89)
+                    self._creep(max(16, first_seg_pct - 1), period=8_000)
                 break
 
     def _drain(self) -> None:

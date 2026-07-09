@@ -132,10 +132,10 @@ class RenderEngine:
             assets_root=ASSETS,
         )
 
-        # Render one segment at a time to avoid accumulating open
-        # VideoFileClip / ffmpeg subprocesses in memory simultaneously.
         seg_paths: list[Path] = []
+        total_segs = len(doc.segments)
         for i, seg in enumerate(doc.segments):
+            print(f"[vp] rendering segment {i+1}/{total_segs}", flush=True)
             dur = max(0.1, seg.duration)
             base_make = self.visual_source(seg, ctx)
             chain = self.frame_chain
