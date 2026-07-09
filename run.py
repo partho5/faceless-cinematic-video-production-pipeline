@@ -309,7 +309,14 @@ def _load_render_profile() -> dict:
 
 def _save_render_profile(data: dict) -> None:
     try:
-        RENDER_PROFILE.write_text(json.dumps(data, ensure_ascii=False,
+        existing = {}
+        if RENDER_PROFILE.exists():
+            try:
+                existing = json.loads(RENDER_PROFILE.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        existing.update(data)
+        RENDER_PROFILE.write_text(json.dumps(existing, ensure_ascii=False,
                                               indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -362,19 +369,34 @@ class App:
         self._init_style()
         body = self._scrollable(master)
 
+        # Load scheduling settings from profile
+        self.schedule_enabled = tk.BooleanVar(value=False)
+        self.schedule_slots = []
+        try:
+            prof = _load_render_profile()
+            self.schedule_enabled.set(prof.get("schedule_enabled", False))
+            self.schedule_slots = prof.get("schedule_slots", [])
+        except Exception:
+            pass
+
         self._build_header(body)
 
         nb = ttk.Notebook(body)
         nb.pack(fill="x", pady=(16, 0))
         tab_content = ttk.Frame(nb, style="App.TFrame")
         tab_output = ttk.Frame(nb, style="App.TFrame")
+        tab_publish = ttk.Frame(nb, style="App.TFrame")
         tab_advanced = ttk.Frame(nb, style="App.TFrame")
         nb.add(tab_content, text="  Content  ")
         nb.add(tab_output, text="  Output  ")
+        nb.add(tab_publish, text="  Publish  ")
         nb.add(tab_advanced, text="  Advanced  ")
         self._build_content(tab_content)
         self._build_output(tab_output)
+        self._build_publish(tab_publish)
         self._build_advanced(tab_advanced)
+
+        nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         tk.Frame(body, bg=T.WARN, height=3).pack(fill="x", pady=(14, 12))
         self._build_actions(body)
@@ -411,6 +433,7 @@ class App:
         self.upload.set(state.get("upload", False))
         self.review.set(state.get("review", False))
         self.sample.set(state.get("sample", False))
+        self.schedule_enabled.set(state.get("schedule_enabled", False))
         self.voice_var.set(state.get("voice", "Leda"))
         self.lang_var.set(state.get("language_label", _LANG_LABELS[0]))
         self.sub_lang_var.set(state.get("subtitle_language_label",
@@ -990,6 +1013,298 @@ class App:
         val = entry.get().strip()
         return "" if val == self._placeholders.get(entry, "\x00") else val
 
+    # -- Publish tab -----------------------------------------------------------
+    def _build_publish(self, p) -> None:
+        o = self._card(p, "Scheduling")
+
+        self.schedule_enabled_check = ttk.Checkbutton(
+            o, variable=self.schedule_enabled,
+            text="Schedule uploads automatically (based on slots below)",
+            style="Switch.TCheckbutton",
+            command=self.save_schedule_config
+        )
+        self.schedule_enabled_check.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+        self.slots_frame = ttk.Frame(o, style="App.TFrame")
+        self.slots_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(5, 15))
+
+        add_frame = ttk.LabelFrame(o, text="  Add New Time Slot  ", style="Card.TLabelframe")
+        add_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=5)
+        
+        add_inner = ttk.Frame(add_frame, style="Panel.TFrame")
+        add_inner.pack(fill="x", padx=14, pady=10)
+
+        ttk.Label(add_inner, text="Days:", style="On.TLabel").grid(row=0, column=0, sticky="w", pady=4)
+        
+        days_frame = ttk.Frame(add_inner, style="App.TFrame")
+        days_frame.grid(row=0, column=1, sticky="w", padx=10, pady=4)
+        
+        self.day_vars = {}
+        for idx, day in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+            var = tk.BooleanVar(value=False)
+            self.day_vars[day] = var
+            ttk.Checkbutton(days_frame, text=day, variable=var, style="Switch.TCheckbutton").pack(side="left", padx=5)
+
+        ttk.Label(add_inner, text="Time:", style="On.TLabel").grid(row=1, column=0, sticky="w", pady=4)
+        
+        time_frame = ttk.Frame(add_inner, style="App.TFrame")
+        time_frame.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        
+        self.spin_hour = ttk.Spinbox(time_frame, from_=1, to=12, width=3, format="%02.0f")
+        self.spin_hour.set("12")
+        self.spin_hour.pack(side="left")
+        
+        ttk.Label(time_frame, text=" : ", style="On.TLabel").pack(side="left")
+        
+        self.spin_min = ttk.Spinbox(time_frame, from_=0, to=59, width=3, format="%02.0f")
+        self.spin_min.set("00")
+        self.spin_min.pack(side="left")
+        
+        ttk.Label(time_frame, text=" ", style="On.TLabel").pack(side="left")
+        
+        self.spin_ampm = ttk.Spinbox(time_frame, values=("PM", "AM"), width=4)
+        self.spin_ampm.set("PM")
+        self.spin_ampm.pack(side="left")
+
+        ttk.Label(add_inner, text="Timezone:", style="On.TLabel").grid(row=2, column=0, sticky="w", pady=4)
+        
+        GMT_OFFSETS = [
+            "GMT-12", "GMT-11", "GMT-10", "GMT-9", "GMT-8", "GMT-7", "GMT-6", "GMT-5", "GMT-4", "GMT-3:30", "GMT-3", "GMT-2", "GMT-1",
+            "GMT",
+            "GMT+1", "GMT+2", "GMT+3", "GMT+3:30", "GMT+4", "GMT+4:30", "GMT+5", "GMT+5:30", "GMT+5:45", "GMT+6", "GMT+6:30", "GMT+7",
+            "GMT+8", "GMT+8:45", "GMT+9", "GMT+9:30", "GMT+10", "GMT+10:30", "GMT+11", "GMT+12", "GMT+12:45", "GMT+13", "GMT+14"
+        ]
+        self.cb_tz = ttk.Combobox(add_inner, values=GMT_OFFSETS, width=10, state="readonly")
+        
+        import time as pytime
+        tz_local = -pytime.timezone if pytime.daylight == 0 else -pytime.altzone
+        tz_hours = tz_local // 3600
+        sign = "+" if tz_hours >= 0 else "-"
+        default_tz = f"GMT{sign}{abs(tz_hours)}" if tz_hours != 0 else "GMT"
+        if default_tz not in GMT_OFFSETS:
+            default_tz = "GMT"
+        self.cb_tz.set(default_tz)
+        self.cb_tz.grid(row=2, column=1, sticky="w", padx=10, pady=4)
+
+        add_btn = ttk.Button(add_inner, text="+ Add Time Slot", style="Ghost.TButton", command=self.add_slot)
+        add_btn.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+        o.columnconfigure(1, weight=1)
+
+        p_card = self._card(p, "Next Slot Preview")
+        
+        self.lbl_ref_time = ttk.Label(p_card, text="Last upload/schedule: -", style="On.TLabel")
+        self.lbl_ref_time.grid(row=0, column=0, sticky="w", pady=4)
+        
+        self.lbl_next_slot = ttk.Label(p_card, text="Next upload slot: -", style="On.TLabel", font=self.f_sec)
+        self.lbl_next_slot.grid(row=1, column=0, sticky="w", pady=4)
+        
+        refresh_btn = ttk.Button(p_card, text="Refresh Preview", style="Ghost.TButton", command=self.update_preview)
+        refresh_btn.grid(row=2, column=0, sticky="w", pady=(10, 0))
+
+        self.refresh_slots_ui()
+
+    def _on_tab_changed(self, event) -> None:
+        try:
+            tab_id = event.widget.select()
+            tab_text = event.widget.tab(tab_id, "text").strip()
+            if tab_text == "Publish":
+                self.update_preview()
+        except Exception:
+            pass
+
+    def refresh_slots_ui(self) -> None:
+        for child in self.slots_frame.winfo_children():
+            child.destroy()
+            
+        if not self.schedule_slots:
+            ttk.Label(self.slots_frame, text="No scheduling slots configured. Click 'Add Slot' below to create one.",
+                      style="MutedOn.TLabel").pack(anchor="w", pady=5)
+            return
+
+        for idx, slot in enumerate(self.schedule_slots):
+            row = ttk.Frame(self.slots_frame, style="App.TFrame")
+            row.pack(fill="x", pady=2)
+            
+            days_str = ", ".join(slot["days"])
+            time_str = f"{slot['hour']:02d}:{slot['minute']:02d} {slot['am_pm']}"
+            tz_str = slot["timezone"]
+            
+            slot_text = f"•  {days_str} @ {time_str} ({tz_str})"
+            ttk.Label(row, text=slot_text, style="On.TLabel").pack(side="left", pady=2)
+            
+            del_btn = ttk.Button(row, text="×", style="Ghost.TButton", width=3,
+                                 command=lambda i=idx: self.delete_slot(i))
+            del_btn.pack(side="right", padx=10)
+
+    def add_slot(self) -> None:
+        selected_days = []
+        for day, var in self.day_vars.items():
+            if var.get():
+                selected_days.append(day)
+        if not selected_days:
+            messagebox.showwarning("No days selected", "Please select at least one day.")
+            return
+
+        try:
+            h = int(self.spin_hour.get())
+            m = int(self.spin_min.get())
+        except ValueError:
+            messagebox.showwarning("Invalid time", "Please enter valid hour and minute numbers.")
+            return
+
+        if not (1 <= h <= 12) or not (0 <= m <= 59):
+            messagebox.showwarning("Invalid time", "Hour must be 1-12, minute must be 0-59.")
+            return
+
+        am_pm = self.spin_ampm.get().upper()
+        if am_pm not in ("AM", "PM"):
+            messagebox.showwarning("Invalid AM/PM", "Please select AM or PM.")
+            return
+
+        tz = self.cb_tz.get()
+
+        new_slot = {
+            "days": selected_days,
+            "hour": h,
+            "minute": m,
+            "am_pm": am_pm,
+            "timezone": tz
+        }
+        self.schedule_slots.append(new_slot)
+        self.save_schedule_config()
+        self.refresh_slots_ui()
+        self.update_preview()
+
+        for var in self.day_vars.values():
+            var.set(False)
+
+    def delete_slot(self, idx: int) -> None:
+        if 0 <= idx < len(self.schedule_slots):
+            self.schedule_slots.pop(idx)
+            self.save_schedule_config()
+            self.refresh_slots_ui()
+            self.update_preview()
+
+    def save_schedule_config(self) -> None:
+        _save_render_profile({
+            "schedule_enabled": self.schedule_enabled.get(),
+            "schedule_slots": self.schedule_slots
+        })
+
+    def update_preview(self) -> None:
+        if not self.schedule_enabled.get():
+            self.lbl_ref_time.configure(text="Last upload/schedule: - (Auto-scheduling disabled)")
+            self.lbl_next_slot.configure(text="Next upload slot: Video will be uploaded immediately as Private")
+            return
+
+        self.lbl_ref_time.configure(text="Fetching latest scheduled video time from YouTube...")
+        self.lbl_next_slot.configure(text="-")
+        
+        threading.Thread(target=self._fetch_preview_worker, daemon=True).start()
+
+    def _fetch_preview_worker(self) -> None:
+        from datetime import datetime, timezone
+        try:
+            from vp.config import Config
+            cfg = Config.load()
+            cid = cfg.env("YT_CLIENT_ID")
+            secret = cfg.env("YT_CLIENT_SECRET")
+            refresh = cfg.env("YT_REFRESH_TOKEN")
+            
+            if not (cid and secret and refresh):
+                ref_time = datetime.now(timezone.utc)
+                ref_str = "Credentials missing (using current time)"
+            else:
+                from vp.pipeline.youtube import _load_credentials
+                from googleapiclient.discovery import build
+                
+                creds, _ = _load_credentials(cid, secret, refresh)
+                yt = build("youtube", "v3", credentials=creds)
+                
+                ch_resp = yt.channels().list(mine=True, part="contentDetails").execute()
+                uploads_playlist_id = ch_resp["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+                playlist_resp = yt.playlistItems().list(
+                    playlistId=uploads_playlist_id,
+                    part="contentDetails",
+                    maxResults=10
+                ).execute()
+
+                video_ids = [item["contentDetails"]["videoId"] for item in playlist_resp.get("items", [])]
+                ref_time = None
+                ref_str = "No uploads found (using current time)"
+                
+                if video_ids:
+                    videos_resp = yt.videos().list(
+                        id=",".join(video_ids),
+                        part="snippet,status"
+                    ).execute()
+                    
+                    times = []
+                    for item in videos_resp.get("items", []):
+                        publish_at = item.get("status", {}).get("publishAt")
+                        if publish_at:
+                            times.append(publish_at)
+                        else:
+                            published_at = item.get("snippet", {}).get("publishedAt")
+                            if published_at:
+                                times.append(published_at)
+                    
+                    if times:
+                        parsed_times = []
+                        for t in times:
+                            try:
+                                cleaned = t.replace("Z", "+00:00")
+                                parsed_times.append(datetime.fromisoformat(cleaned))
+                            except Exception:
+                                pass
+                        if parsed_times:
+                            ref_time = max(parsed_times)
+                
+                if not ref_time:
+                    ref_time = datetime.now(timezone.utc)
+                    ref_str = "No uploads found (using current time)"
+
+            if not self.schedule_slots:
+                next_str = "No slots configured"
+                # ref_str was already set from the fetch block above
+            else:
+                from vp.schedule import calculate_next_slot_with_tz
+                next_time_utc, slot_tz, slot_tz_str = calculate_next_slot_with_tz(ref_time, self.schedule_slots)
+                # Format next slot in the slot's local timezone
+                next_local = next_time_utc.astimezone(slot_tz)
+                next_str = next_local.strftime("%A, %Y-%m-%d %I:%M %p") + f" ({slot_tz_str})"
+                # Re-format ref_time in the same timezone for consistency
+                ref_local = ref_time.astimezone(slot_tz)
+                ref_str = ref_local.strftime("%Y-%m-%d %I:%M %p") + f" ({slot_tz_str})"
+
+            def update_gui():
+                self.lbl_ref_time.configure(text=f"Last upload/schedule: {ref_str}")
+                self.lbl_next_slot.configure(text=f"Next upload slot: {next_str}")
+
+            self.master.after(0, update_gui)
+            
+        except Exception as e:
+            err_msg = str(e)
+            ref_time = datetime.now(timezone.utc)
+            if not self.schedule_slots:
+                next_str = "No slots configured"
+            else:
+                from vp.schedule import calculate_next_slot_with_tz
+                try:
+                    next_time_utc, slot_tz, slot_tz_str = calculate_next_slot_with_tz(ref_time, self.schedule_slots)
+                    next_local = next_time_utc.astimezone(slot_tz)
+                    next_str = next_local.strftime(f"%A, %Y-%m-%d %I:%M %p") + f" ({slot_tz_str})"
+                except Exception:
+                    next_str = "Error calculating"
+
+            def update_gui_err():
+                self.lbl_ref_time.configure(text=f"Last upload/schedule: Error fetching ({err_msg[:40]})")
+                self.lbl_next_slot.configure(text=f"Next upload slot (est. from now): {next_str}")
+
+            self.master.after(0, update_gui_err)
+
     # -- Advanced tab ----------------------------------------------------------
     def _build_advanced(self, p) -> None:
         self._build_font_section(p)
@@ -1408,6 +1723,8 @@ class App:
             "duration_sec": self.duration_sec.get(),
             "english_font": getattr(self, "english_font_var",
                                     tk.StringVar()).get(),
+            "schedule_enabled": self.schedule_enabled.get(),
+            "schedule_slots": self.schedule_slots,
         })
         argv = self._argv()
         if not argv:
@@ -1490,6 +1807,7 @@ class App:
             "upload": self.upload.get(),
             "review": self.review.get(),
             "sample": self.sample.get(),
+            "schedule_enabled": self.schedule_enabled.get(),
             "voice": self.voice_var.get(),
             "language_label": self.lang_var.get(),
             "subtitle_language_label": self.sub_lang_var.get(),
@@ -1657,6 +1975,12 @@ class App:
             "  • Both API keys are invalid or expired\n"
             "  • A temporary service outage\n\n"
             "Check your .env file and try again.",
+        ),
+        "YT_SCHEDULE_WARNING": (
+            "YouTube Scheduling Warning",
+            "Automatic scheduling could not be completed:\n\n"
+            "{detail}\n\n"
+            "The video was uploaded immediately as PRIVATE.",
         ),
     }
 

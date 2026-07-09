@@ -46,7 +46,10 @@ from pathlib import Path
 from ..config import Config, ROOT
 
 FORCED_PRIVACY = "private"   # G15: cannot be public via API until verified
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly"
+]
 TOKEN_FILE = ROOT / ".yt_token.json"  # gitignored, persists refresh token
 
 
@@ -129,7 +132,13 @@ def _load_credentials(cid: str, secret: str, refresh: str):
     #    If the refresh token itself is expired → catch invalid_grant and
     #    fall through to browser re-auth.
     needs_reauth = False
-    if not creds.valid:
+    
+    # Check if we have all requested scopes in cached creds
+    has_all_scopes = creds and all(s in (creds.scopes or []) for s in SCOPES)
+    if not has_all_scopes:
+        needs_reauth = True
+
+    if not needs_reauth and not creds.valid:
         try:
             creds.refresh(Request())
             _save_token(creds)
@@ -196,9 +205,79 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
     try:
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
+        from datetime import datetime, timezone
+
+        # Load schedule profile settings
+        profile_path = ROOT / ".render_profile.json"
+        schedule_enabled = False
+        schedule_slots = []
+        if profile_path.exists():
+            try:
+                prof = json.loads(profile_path.read_text(encoding="utf-8"))
+                schedule_enabled = prof.get("schedule_enabled", False)
+                schedule_slots = prof.get("schedule_slots", [])
+            except Exception:
+                pass
+
+        publish_at_str = None
+        if schedule_enabled:
+            if not schedule_slots:
+                print("[vp] [API_ERROR:YT_SCHEDULE_WARNING] No active scheduling slots configured.", flush=True)
+            else:
+                try:
+                    creds, reauthed = _load_credentials(cid, secret, refresh)
+                    yt = build("youtube", "v3", credentials=creds)
+                    
+                    # Fetch last upload/schedule time
+                    ch_resp = yt.channels().list(mine=True, part="contentDetails").execute()
+                    uploads_playlist_id = ch_resp["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+                    playlist_resp = yt.playlistItems().list(
+                        playlistId=uploads_playlist_id,
+                        part="contentDetails",
+                        maxResults=10
+                    ).execute()
+
+                    video_ids = [item["contentDetails"]["videoId"] for item in playlist_resp.get("items", [])]
+                    
+                    ref_time = None
+                    if video_ids:
+                        videos_resp = yt.videos().list(
+                            id=",".join(video_ids),
+                            part="snippet,status"
+                        ).execute()
+                        
+                        times = []
+                        for item in videos_resp.get("items", []):
+                            publish_at = item.get("status", {}).get("publishAt")
+                            if publish_at:
+                                times.append(publish_at)
+                            else:
+                                published_at = item.get("snippet", {}).get("publishedAt")
+                                if published_at:
+                                    times.append(published_at)
+                        
+                        if times:
+                            parsed_times = []
+                            for t in times:
+                                try:
+                                    cleaned = t.replace("Z", "+00:00")
+                                    parsed_times.append(datetime.fromisoformat(cleaned))
+                                except Exception:
+                                    pass
+                            if parsed_times:
+                                ref_time = max(parsed_times)
+                    
+                    if not ref_time:
+                        ref_time = datetime.now(timezone.utc)
+
+                    from vp.schedule import calculate_next_slot
+                    next_slot = calculate_next_slot(ref_time, schedule_slots)
+                    publish_at_str = next_slot.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                except Exception as e:
+                    print(f"[vp] [API_ERROR:YT_SCHEDULE_WARNING] Failed to fetch last scheduled time: {e}", flush=True)
 
         creds, reauthed = _load_credentials(cid, secret, refresh)
-
         yt = build("youtube", "v3", credentials=creds)
 
         # Prefer the publish-ready SEO description (chapters + music credit
@@ -214,16 +293,20 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
             "defaultLanguage":      lang,
             "defaultAudioLanguage": metadata.get("default_audio_language") or lang,
         }
+        status_body = {
+            "privacyStatus":          FORCED_PRIVACY,
+            "selfDeclaredMadeForKids": bool(
+                metadata.get("made_for_kids", False)),
+            # synthetic/altered-media disclosure (G11); harmless if the
+            # account/API rev ignores the hint.
+            "containsSyntheticMedia": True,
+        }
+        if publish_at_str:
+            status_body["publishAt"] = publish_at_str
+
         body = {
             "snippet": snippet,
-            "status": {
-                "privacyStatus":          FORCED_PRIVACY,
-                "selfDeclaredMadeForKids": bool(
-                    metadata.get("made_for_kids", False)),
-                # synthetic/altered-media disclosure (G11); harmless if the
-                # account/API rev ignores the hint.
-                "containsSyntheticMedia": True,
-            },
+            "status": status_body,
         }
         req = yt.videos().insert(
             part="snippet,status",
@@ -237,11 +320,12 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
         # manually from `metadata.json::thumbnail_prompt` via Gemini's web UI,
         # so there is no local image file to push. Set it in YouTube Studio.
         return {
-            "status":    "uploaded",
+            "status":    "uploaded" if not publish_at_str else "scheduled",
             "video_id":  vid,
             "privacy":   FORCED_PRIVACY,
             "url":       f"https://youtu.be/{vid}" if vid else None,
             "reauthed":  reauthed,
+            "publish_at": publish_at_str,
         }
 
     except Exception as e:  # never block the run
@@ -253,3 +337,4 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
                 "Run `python scripts/youtube_oauth_setup.py` manually, then retry."
             )
         return {"status": "failed", "reason": reason[:400], "privacy": None}
+
