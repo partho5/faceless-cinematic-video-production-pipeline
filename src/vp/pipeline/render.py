@@ -13,6 +13,7 @@ smoke/e2e). Visuals are built against seg.real_start/real_end only.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -21,6 +22,7 @@ import numpy as np
 
 from ..audio_util import SR, read_wav, write_wav
 from ..config import ASSETS, Config
+from ..fx import EFFECT_REGISTRY
 from ..schema.model import ControlDocument, Segment
 from .align import Alignment
 from .timeline import Timeline, reflow
@@ -140,8 +142,14 @@ class RenderEngine:
             base_make = self.visual_source(seg, ctx)
             chain = self.frame_chain
 
-            def make_frame(t: float, _s=seg, _b=base_make, _c=chain):
+            # Randomly pick one entry effect per clip (anti-fatigue system).
+            # The effect runs BEFORE the rest of the chain so subtitles,
+            # color grades, and grain are composited cleanly on top.
+            clip_effect = random.choice(EFFECT_REGISTRY)()
+
+            def make_frame(t: float, _s=seg, _b=base_make, _c=chain, _e=clip_effect):
                 frame = _b(t)
+                frame = _e(_s, frame, t, ctx)   # clip entry effect
                 for fn in _c:
                     frame = fn(_s, frame, t, ctx)
                 return frame
