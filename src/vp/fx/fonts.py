@@ -157,12 +157,15 @@ def load_font(personality: str, fonts_map_key: str | None, size: int, text: str 
     if fonts_map_key:
         candidates.append(str(ASSETS / "fonts" / fonts_map_key))
     # For Latin/English text, insert the user's preferred aesthetic font
-    # before the Noto fallback so it wins whenever present.
+    # before the system fallback so it wins whenever present.
     if is_latin and _english_font:
         eng_path = ASSETS / "fonts" / _english_font
         if eng_path.exists():
             candidates.append(str(eng_path))
-    if global_font.exists():
+    # Only use Noto Unicode fonts for scripts that actually need them.
+    # Latin text falls back to the system bold font (DejaVu, Arial, etc.)
+    # to preserve the pre-Unicode-patch visual style.
+    if not is_latin and global_font.exists():
         candidates.append(str(global_font))
     sysf = _system_font_path()
     if sysf:
