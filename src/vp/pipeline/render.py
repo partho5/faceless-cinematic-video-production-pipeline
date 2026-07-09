@@ -23,6 +23,7 @@ import numpy as np
 from ..audio_util import SR, read_wav, write_wav
 from ..config import ASSETS, Config
 from ..fx import EFFECT_REGISTRY
+from ..fx.transitions import apply_transitions
 from ..schema.model import ControlDocument, Segment
 from .align import Alignment
 from .timeline import Timeline, reflow
@@ -171,11 +172,16 @@ class RenderEngine:
         if not voice.exists():
             self._build_voice_track(doc.segments, voice)
 
-        # Concatenate all segment videos and mux audio in one ffmpeg pass
-        # (no re-encode of video: stream copy keeps quality and is fast)
+        # Apply inter-clip transitions (random xfade between every adjacent pair).
+        # Returns a single merged video path, or falls back to original seg_paths
+        # on any error — either way the concat step below stays the same.
+        print("[vp] applying inter-clip transitions...", flush=True)
+        final_paths = apply_transitions(seg_paths, work, p["fps"])
+
+        # Concatenate (merged) video and mux the master audio track
         concat_list = work / "_concat.txt"
         concat_list.write_text(
-            "\n".join(f"file '{sp.as_posix()}'" for sp in seg_paths),
+            "\n".join(f"file '{sp.as_posix()}'" for sp in final_paths),
             encoding="utf-8",
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,10 +194,16 @@ class RenderEngine:
             check=True, capture_output=True,
         )
 
-        # Clean up temp files
+        # Clean up temp files (original segments + any transition merge files)
         for sp in seg_paths:
             sp.unlink(missing_ok=True)
+        for fp in final_paths:
+            fp.unlink(missing_ok=True)
         concat_list.unlink(missing_ok=True)
+        # clean up any remaining _trans_*.mp4 in work dir
+        for tp in work.glob("_trans_*.mp4"):
+            tp.unlink(missing_ok=True)
+
 
         return {
             "path": str(out_path),
