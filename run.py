@@ -742,7 +742,7 @@ class App:
 
         ttk.Label(o, text="Video Orientation", style="On.TLabel").grid(
             row=0, column=0, sticky="w", pady=4)
-        self.shape = tk.StringVar(value="landscape")
+        self.shape = tk.StringVar(value=_load_render_profile().get("shape", "landscape"))
         ttk.Radiobutton(o, text="Landscape (long video)", variable=self.shape,
                         value="landscape").grid(row=0, column=1, sticky="w",
                                                 padx=10)
@@ -1722,6 +1722,7 @@ class App:
             "add_music": self.add_music.get(),
             "highly_emotional": self.highly_emotional.get(),
             "output_dir": self.output_dir_var.get().strip(),
+            "shape": self.shape.get(),
             "duration_min": self.duration_min.get(),
             "duration_sec": self.duration_sec.get(),
             "english_font": getattr(self, "english_font_var",
