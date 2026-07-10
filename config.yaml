@@ -52,18 +52,19 @@ models:
     params: { max_tokens: 1500, temperature: 0.8 }
 
   # Voiceover. CONTINUOUS per-chapter synthesis (natural model-driven
-  # pacing); segments are sliced from the continuous read, not stitched.
+  # pacing); segments are sliced from the continuous read, not stitched. 
   tts_audio:
     provider: google
     # 3.1-flash-tts: free-tier OK, dramatic spacious cadence (matches the
     # approved Leda reference). pro-tts is free-tier quota 0.
+    # gemini-2.5-flash-preview-tts  has higher quota. gemini-3.1-flash-tts-preview is better quality with 10 request/minute
     model: gemini-3.1-flash-tts-preview
     api_key_env: GEMINI_API_KEY
     # extra rotation keys: GEMINI_API_KEY_1..N in .env. Rotated per chapter + 429 cooldown.
     voice_name: Leda                    # locked: approved voice
     # AI-Studio-style framing prepended to every chapter (the prompt the
     # user validated). Override per-video via video_meta.tts_scene/tts_context.
-    tts_scene: "Dark psychological documentary narration. The voice speaks like an investigator exposing a system that has been quietly manipulating people in plain sight, revealing what they never noticed was happening to them."
+    tts_scene: " psychological youtube video narration. The voice speaks like an investigator exposing a system that has been quietly manipulating people in plain sight, revealing what they never noticed was happening to them."
     tts_context: "This is for a consumer psychology channel that uncovers the hidden mechanics behind buying behavior. Default delivery is fast, confident, and authoritative, like someone who already knows the twist before the audience does. When a hidden manipulation is revealed, the voice sharpens and rises in volume and intensity, landing the reveal like a punch. Tone shifts naturally with the content: anger tightens and hardens the voice, humor loosens it with a wry, knowing edge, excitement speeds it up and lifts the pitch. Pacing is dynamic throughout, never flat or monotone, always moving with the emotional beat of the script."
     params: { temperature: 1.0 }
 

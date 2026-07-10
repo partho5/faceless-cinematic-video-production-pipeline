@@ -8,6 +8,21 @@ the exact spoken word span; an exit animation plays at the tail.
 `local_t` (render time within segment) shares the same clock as the aligned
 word times (offsets relative to the segment audio file), so they compare
 directly.
+
+Vertical-video subtitle chunking
+---------------------------------
+When ctx.w < ctx.h (portrait/9:16 shape) the full sentence is split into
+small word-groups so that only ONE group (≤1 line) is visible at a time.
+Grouping uses a greedy character budget of _VERTICAL_CHAR_BUDGET (12 chars
+including spaces): words accumulate into a chunk until adding the next word
+would exceed the budget, then a new chunk starts.  Examples:
+  "brush your teeth"  →  chunk 1: "brush your" (10), chunk 2: "teeth" (5)
+  "I go now"          →  chunk 1: "I go now" (8 — fits in one)
+  "extraordinary"     →  chunk 1: "extraordinary" (13 — single word, forced)
+Each chunk is centred at the same fixed bottom-third position.  Only the
+chunk whose time-window covers `local_t` is rendered; all others are
+completely invisible.  Word timestamps remain the original force-aligned
+values — sync accuracy is unchanged.
 """
 from __future__ import annotations
 
@@ -31,6 +46,7 @@ class _Word:
     h: int
     emphasis: str | None = None
     color_shift: str | None = None
+    chunk_id: int = 0  # vertical-video chunk index (ignored for landscape)
 
 
 def _hex(c: str, default=(255, 255, 255)) -> tuple[int, int, int]:
@@ -40,6 +56,53 @@ def _hex(c: str, default=(255, 255, 255)) -> tuple[int, int, int]:
     except Exception:
         return default
 
+
+# ---------------------------------------------------------------------------
+# Helpers for vertical-video subtitle chunking
+# ---------------------------------------------------------------------------
+
+# Maximum characters (including inter-word spaces) that fit on one line of a
+# vertical (9:16) frame at the default font size.  Empirically ~12 chars.
+_VERTICAL_CHAR_BUDGET: int = 12
+
+
+def _make_vertical_chunks(
+    tokens: list[str],
+    times: list[tuple[float, float]],
+) -> list[list[tuple[str, float, float]]]:
+    """Group tokens into screen-chunks using a greedy character budget.
+
+    Each chunk accumulates words until adding the next word would push the
+    total character count (including spaces) beyond _VERTICAL_CHAR_BUDGET.
+    A single word that already exceeds the budget is emitted alone — we never
+    drop words.
+
+    Returns a list of chunks; each chunk is a list of (token, start, end)
+    triples using the original force-aligned timestamps — sync is preserved.
+    """
+    chunks: list[list[tuple[str, float, float]]] = []
+    current: list[tuple[str, float, float]] = []
+    current_chars: int = 0
+
+    for tok, (ts, te) in zip(tokens, times):
+        tok_chars = len(tok)
+        # Characters this token adds: the token itself + a leading space if
+        # the chunk is non-empty.
+        added = tok_chars + (1 if current else 0)
+        if current and current_chars + added > _VERTICAL_CHAR_BUDGET:
+            chunks.append(current)
+            current = [(tok, ts, te)]
+            current_chars = tok_chars
+        else:
+            current.append((tok, ts, te))
+            current_chars += added
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+# ---------------------------------------------------------------------------
 
 class TextRenderer:
     def __init__(self) -> None:
@@ -73,7 +136,49 @@ class TextRenderer:
             span = al.find(e.word) if al else None
             emph_spans.append((e.word, e.effect, e.color_shift, span))
 
-        # word-wrap to <=86% width
+        # ── VERTICAL VIDEO: chunk-based single-line layout ──────────────────
+        # When the canvas is taller than it is wide (portrait/9:16) we split
+        # the sentence into small word-groups and position every group at the
+        # same fixed row.  Only the active chunk is rendered each frame;
+        # all others are silently skipped in __call__.  Landscape is untouched.
+        is_vertical = ctx.w < ctx.h
+        if is_vertical:
+            v_chunks = _make_vertical_chunks(tokens, times)
+
+            tmp = Image.new("RGBA", (10, 10))
+            d   = ImageDraw.Draw(tmp)
+            space_w = d.textlength(" ", font=font) + style.get("tracking", 0)
+
+            line_h = int(size * 1.25)
+            # Fixed anchor — bottom-third regardless of text_position so we
+            # always have a consistent one-line subtitle band.
+            y0 = int(ctx.h * 0.82) - line_h // 2
+
+            words: list[_Word] = []
+            for cid, chunk in enumerate(v_chunks):
+                # Measure total pixel width of this chunk
+                widths: list[int] = []
+                for tok, _, _ in chunk:
+                    bbox = d.textbbox((0, 0), tok, font=font)
+                    widths.append(bbox[2] - bbox[0])
+                total_w = sum(widths) + int(space_w) * (len(chunk) - 1)
+                x = (ctx.w - total_w) // 2
+
+                for (tok, ts, te), tw in zip(chunk, widths):
+                    em, cs = None, None
+                    tl = tok.lower().strip(".,!?;:")
+                    for eword, eff, csh, span in emph_spans:
+                        if tl in eword.lower().split():
+                            em, cs = eff, csh
+                    words.append(_Word(tok, ts, te, x, y0, tw, line_h, em, cs,
+                                       chunk_id=cid))
+                    x += tw + int(space_w)
+
+            self._cache[seg.id] = words
+            return words
+        # ── END VERTICAL ────────────────────────────────────────────────────
+
+        # word-wrap to <=86% width  (landscape — unchanged)
         max_w = int(ctx.w * 0.86)
         tmp = Image.new("RGBA", (10, 10))
         d = ImageDraw.Draw(tmp)
@@ -127,6 +232,30 @@ class TextRenderer:
         dur = max(0.1, seg.duration)
         anim_in = seg.text_animation_in
         anim_out = seg.text_animation_out
+
+        # ── VERTICAL VIDEO: only render words belonging to the active chunk ──
+        # A chunk is active when local_t falls within [chunk_start, chunk_end].
+        # chunk_start = first word's .start; chunk_end = last word's .end.
+        # This uses the exact force-aligned timestamps — millisecond accuracy.
+        is_vertical = ctx.w < ctx.h
+        if is_vertical and words:
+            # Find which chunk_id is active: the one whose first word has
+            # started and whose last word has not yet ended at local_t.
+            # chunk_id is stamped on every _Word during _layout — no
+            # re-computation needed, timestamps are the original alignment.
+            active_cid: int | None = None
+            # Group words by chunk_id to find boundaries efficiently
+            chunk_ids = sorted({w.chunk_id for w in words})
+            for cid in chunk_ids:
+                cw = [w for w in words if w.chunk_id == cid]
+                if cw[0].start <= local_t <= cw[-1].end:
+                    active_cid = cid
+                    break
+            if active_cid is None:
+                # Between chunks or before the first word — show nothing
+                return frame
+            words = [w for w in words if w.chunk_id == active_cid]
+        # ── END VERTICAL FILTER ─────────────────────────────────────────────
 
         overlay = Image.new("RGBA", (ctx.w, ctx.h), (0, 0, 0, 0))
         d = ImageDraw.Draw(overlay)
