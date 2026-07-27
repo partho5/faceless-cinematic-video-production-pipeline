@@ -1,10 +1,12 @@
-"""Anthropic call helper with OpenRouter free-tier fallback.
+"""Anthropic call helper with Groq / OpenAI / OpenRouter fallback chain.
 
-Primary provider: Anthropic. On ANY Anthropic failure the identical prompt
-is retried via OpenRouter, rotating through all available OPENROUTER_API_KEY*
-values and a cascade of free long-context models. If every provider also
-fails, a [API_ERROR:…] sentinel is printed so the GUI can surface a
-user-friendly dialog.
+Primary provider: Anthropic (Claude). On ANY Anthropic failure — or if
+ANTHROPIC_API_KEY is absent — the identical prompt is retried, in order,
+via: Groq, then OpenAI (gpt-4o-mini), then OpenRouter's free-tier model
+cascade. A provider whose API key is missing/blank/commented in .env is
+skipped without ever attempting a network call — it's treated the same as
+a failure and the chain moves on. If every provider fails, a [API_ERROR:…]
+sentinel is printed so the GUI can surface a user-friendly dialog.
 
 TTS continues to use Gemini exclusively — see pipeline/tts_gemini.py and
 pipeline/voice.py. This module no longer touches Gemini.
@@ -235,6 +237,59 @@ def _groq_text(spec, system: str, user: str) -> tuple[str, str, Any]:
     return text, model, usage
 
 
+class OpenAIUsageWrapper:
+    def __init__(self, usage):
+        self.input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        self.output_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+
+def _openai_text(spec, system: str, user: str) -> tuple[str, str, Any]:
+    """OpenAI fallback text generation (default model: gpt-4o-mini).
+    Returns (text, model_name, usage_object).
+
+    Mirrors _groq_text: reads the key from Config first, falls back to a
+    direct .env parse (Config loads .env into its own dict, not os.environ).
+    Model is overridable via OPENAI_MODEL (matches the user's own .env var
+    naming); default is gpt-4o-mini.
+    """
+    from openai import OpenAI
+    from .config import get_config
+
+    try:
+        cfg = get_config()
+        openai_api_key = cfg.env("OPENAI_API_KEY")
+    except Exception:
+        from .config import ROOT, _parse_env_file
+        env = {**os.environ}
+        env.update(_parse_env_file(ROOT / ".env"))
+        openai_api_key = env.get("OPENAI_API_KEY", "")
+
+    if not openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY not configured")
+
+    client = OpenAI(api_key=openai_api_key)
+    model = os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini"
+
+    params = dict(spec.params or {})
+    temperature = params.get("temperature", 0.6)
+    max_tokens = params.get("max_tokens", 4000)
+
+    completion = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    text = completion.choices[0].message.content or ""
+    if not text:
+        raise ValueError("empty response from OpenAI")
+
+    return text, model, getattr(completion, "usage", None)
+
+
 def _clean_think(text: str) -> str:
     import re
     if "<think>" in text:
@@ -243,6 +298,28 @@ def _clean_think(text: str) -> str:
         else:
             text = text.split("<think>")[0]
     return text.strip()
+
+
+def _key_present(name: str) -> bool:
+    """Cheap presence check for a named .env/environment key (no network).
+
+    Used only to pick which provider's exception is the "root cause" when
+    every fallback tier has been exhausted — never to gate an actual call
+    (each tier already gates its own call independently).
+    """
+    try:
+        from .config import get_config
+        if get_config().env(name):
+            return True
+    except Exception:
+        pass
+    try:
+        from .config import ROOT, _parse_env_file
+        env = {**os.environ}
+        env.update(_parse_env_file(ROOT / ".env"))
+        return bool(env.get(name, "").strip())
+    except Exception:
+        return False
 
 
 def anthropic_message(spec, *, system: str, user: str) -> str:
@@ -320,11 +397,42 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
     except Exception as e:
         groq_exc = e
 
+    # ---------------------------------------------------------------- OpenAI fallback
+    openai_exc: Exception | None = None
+    try:
+        if spec.api_key:
+            print(
+                f"[vp] warn: Anthropic failed ({str(anthropic_exc)[:50]}) and "
+                f"Groq failed ({str(groq_exc)[:50]}) — retrying via OpenAI…",
+                flush=True,
+            )
+        else:
+            print(
+                f"[vp] info: Anthropic not configured and Groq failed "
+                f"({str(groq_exc)[:60]}) — attempting via OpenAI…",
+                flush=True,
+            )
+
+        text, openai_model, usage = _openai_text(spec, system, user)
+        from .cost import record
+        usage_obj = OpenAIUsageWrapper(usage) if usage is not None else None
+        record(openai_model, usage_obj, getattr(spec, "purpose", "llm"))
+        return _clean_think(text)
+    except Exception as e:
+        openai_exc = e
+
     # ---------------------------------------------------------------- OpenRouter fallback
     if spec.api_key:
-        err_origin = f"Anthropic failed ({str(anthropic_exc)[:60]}) and Groq failed ({str(groq_exc)[:60]})"
+        err_origin = (
+            f"Anthropic failed ({str(anthropic_exc)[:40]}), "
+            f"Groq failed ({str(groq_exc)[:40]}) and "
+            f"OpenAI failed ({str(openai_exc)[:40]})"
+        )
     else:
-        err_origin = f"Groq failed ({str(groq_exc)[:60]})"
+        err_origin = (
+            f"Groq failed ({str(groq_exc)[:50]}) and "
+            f"OpenAI failed ({str(openai_exc)[:50]})"
+        )
 
     print(
         f"[vp] warn: {err_origin} — retrying via OpenRouter…",
@@ -342,11 +450,22 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
             f"[vp] warn: OpenRouter fallback also failed ({str(openrouter_exc)[:120]})",
             flush=True,
         )
-        
-        primary_exc = anthropic_exc if spec.api_key else groq_exc
+
+        # Root-cause exception = whichever provider was actually the
+        # intended primary: Anthropic if configured, else the first of
+        # Groq/OpenAI that had a key configured, else Groq's
+        # "not configured" message as a last resort (nothing was set up).
+        if spec.api_key:
+            primary_exc = anthropic_exc
+        elif _key_present("GROQ_API_KEY"):
+            primary_exc = groq_exc
+        elif _key_present("OPENAI_API_KEY"):
+            primary_exc = openai_exc
+        else:
+            primary_exc = groq_exc
         _err = str(primary_exc)
         _err_lower = _err.lower()
-        
+
         import anthropic
         if isinstance(primary_exc, anthropic.AuthenticationError):
             print(
@@ -367,6 +486,33 @@ def anthropic_message(spec, *, system: str, user: str) -> str:
             )):
                 print(
                     f"[vp] [API_ERROR:ANTHROPIC_CREDITS] {_err[:200]}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[vp] [API_ERROR:LLM_ALL_FAILED] {_err[:200]}",
+                    flush=True,
+                )
+        elif not spec.api_key and primary_exc is openai_exc:
+            try:
+                import openai as openai_sdk
+                is_auth_error = isinstance(primary_exc, openai_sdk.AuthenticationError)
+                is_rate_error = isinstance(
+                    primary_exc,
+                    (openai_sdk.RateLimitError, openai_sdk.PermissionDeniedError),
+                )
+            except ImportError:
+                is_auth_error = "authentication" in _err_lower or "api_key" in _err_lower or "unauthorized" in _err_lower
+                is_rate_error = "rate_limit" in _err_lower or "quota" in _err_lower or "insufficient_quota" in _err_lower
+
+            if is_auth_error:
+                print(
+                    f"[vp] [API_ERROR:OPENAI_KEY_INVALID] {_err[:200]}",
+                    flush=True,
+                )
+            elif is_rate_error:
+                print(
+                    f"[vp] [API_ERROR:OPENAI_CREDITS] {_err[:200]}",
                     flush=True,
                 )
             else:

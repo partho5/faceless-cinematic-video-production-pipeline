@@ -45,12 +45,14 @@ class ModelSpec:
         if self.api_key:
             return False
         if self.provider == "anthropic":
-            if os.environ.get("GROQ_API_KEY", "").strip():
-                return False
+            for fallback_env in ("GROQ_API_KEY", "OPENAI_API_KEY"):
+                if os.environ.get(fallback_env, "").strip():
+                    return False
             try:
                 env = _parse_env_file(ROOT / ".env")
-                if env.get("GROQ_API_KEY", "").strip():
-                    return False
+                for fallback_env in ("GROQ_API_KEY", "OPENAI_API_KEY"):
+                    if env.get(fallback_env, "").strip():
+                        return False
             except Exception:
                 pass
         return True

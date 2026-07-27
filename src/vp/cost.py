@@ -28,6 +28,8 @@ _PRICING: dict[str, tuple[float, float]] = {
     "meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),
     # Groq fallback models — $0 cost
     "qwen/qwen3-32b": (0.0, 0.0),
+    # OpenAI fallback model (public list pricing)
+    "gpt-4o-mini": (0.15, 0.60),
 }
 # fallback for an unknown/new model id (Sonnet-class), flagged in the report.
 _FALLBACK = (3.0, 15.0)

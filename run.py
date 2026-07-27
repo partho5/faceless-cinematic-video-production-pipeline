@@ -1955,6 +1955,19 @@ class App:
             "Your Groq account has insufficient credits or has been rate limited.\n\n"
             "Fix: check your billing and limits at console.groq.com",
         ),
+        "OPENAI_KEY_INVALID": (
+            "OpenAI API Key Invalid",
+            "Your OpenAI API key was rejected (invalid or expired).\n\n"
+            "Fix:\n"
+            "  1. Open your .env file\n"
+            "  2. Update OPENAI_API_KEY with a valid key\n"
+            "  3. Get or rotate keys at: platform.openai.com → API Keys",
+        ),
+        "OPENAI_CREDITS": (
+            "OpenAI Credits/Rate Limit Exceeded",
+            "Your OpenAI account has insufficient credits or has been rate limited.\n\n"
+            "Fix: check your billing and limits at platform.openai.com → Billing",
+        ),
         "GEMINI_KEY_INVALID": (
             "Gemini API Key Invalid",
             "Your Gemini API key was rejected by Google (invalid or expired).\n\n"
@@ -1973,10 +1986,10 @@ class App:
         ),
         "LLM_ALL_FAILED": (
             "All AI Providers Failed",
-            "Both Anthropic and Gemini failed to respond.\n\n"
+            "Anthropic, Groq, OpenAI, and OpenRouter all failed to respond.\n\n"
             "Possible causes:\n"
             "  • No internet connection\n"
-            "  • Both API keys are invalid or expired\n"
+            "  • Configured API keys are invalid or expired\n"
             "  • A temporary service outage\n\n"
             "Check your .env file and try again.",
         ),
