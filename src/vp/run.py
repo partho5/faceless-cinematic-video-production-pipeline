@@ -213,12 +213,24 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     from .pipeline.voice import VoiceStage
 
     if not (tts_scene and tts_context):
+        # Look in video_meta first (checkpoint/resume support)
+        tts_scene = doc.video_meta.get("tts_scene")
+        tts_context = doc.video_meta.get("tts_context")
+
+    if not (tts_scene and tts_context):
         from .llm import tts_framing
         fr = tts_framing(cfg.model("metadata_text"), topic)
         if fr:
             tts_scene = tts_scene or fr[0]
             tts_context = tts_context or fr[1]
             _log("voice framing: auto-derived from topic")
+            doc.video_meta["tts_scene"] = tts_scene
+            doc.video_meta["tts_context"] = tts_context
+            # Save the updated control document so --resume restores it
+            _video_json.write_text(
+                json.dumps(doc.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
     _vs = VoiceStage(cfg)
     if tts_scene:
         _vs.scene = tts_scene

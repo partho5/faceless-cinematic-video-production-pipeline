@@ -57,7 +57,9 @@ models:
     provider: google
     # 3.1-flash-tts: free-tier OK, dramatic spacious cadence (matches the
     # approved Leda reference). pro-tts is free-tier quota 0.
-    # gemini-2.5-flash-preview-tts  has higher quota. gemini-3.1-flash-tts-preview is better quality with 10 request/minute
+    # NOTE: gemini-2.5-flash-preview-tts and gemini-2.5-flash-tts share the
+    # same quota bucket and are currently EXHAUSTED (10/day limit hit).
+    # gemini-3.1-flash-tts-preview has a SEPARATE quota bucket — use this.
     model: gemini-3.1-flash-tts-preview
     api_key_env: GEMINI_API_KEY
     # extra rotation keys: GEMINI_API_KEY_1..N in .env. Rotated per chapter + 429 cooldown.

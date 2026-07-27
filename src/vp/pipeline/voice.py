@@ -258,6 +258,39 @@ class VoiceStage:
                 last = e
                 err_str = str(e)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    # ----------------------------------------------------------------
+                    # CRITICAL: Distinguish per-minute throttle from daily exhaustion.
+                    #
+                    # Per-minute (RPM) limits:  quotaId contains "PerMinute" or
+                    #   "RequestsPerMinutePerProject" — safe to park key and retry
+                    #   after the server-suggested cooldown (57 s typical).
+                    #
+                    # Daily/per-day limits:  quotaId contains "PerDay" or
+                    #   "GenerateRequestsPerDayPerProject" — the daily bucket is
+                    #   empty; retrying is FUTILE and makes things worse by:
+                    #     1. Consuming all remaining retry budget pointlessly.
+                    #     2. Generating more error-log noise.
+                    #     3. Potentially triggering abuse-detection heuristics.
+                    #   Abort immediately with a clear message.
+                    # ----------------------------------------------------------------
+                    _is_daily = (
+                        "PerDay" in err_str
+                        or "PerDayPer" in err_str
+                        or "GenerateRequestsPerDay" in err_str
+                    )
+                    if _is_daily:
+                        print(
+                            f"[vp] [API_ERROR:GEMINI_DAILY_QUOTA_EXHAUSTED] "
+                            f"Daily free-tier quota for this GCP project is "
+                            f"exhausted (10 calls/day). "
+                            f"Retrying is futile — aborting immediately.\n"
+                            f"  Retry suggested by server: see error below.\n"
+                            f"  {err_str[:400]}",
+                            flush=True,
+                        )
+                        raise RuntimeError(
+                            f"Daily quota exhausted — no point retrying: {last}"
+                        ) from e
                     KeyPool.park(key, err_str)
                     failures += 1
                     continue
