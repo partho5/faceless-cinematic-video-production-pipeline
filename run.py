@@ -1016,6 +1016,21 @@ class App:
 
     # -- Publish tab -----------------------------------------------------------
     def _build_publish(self, p) -> None:
+        acct = self._card(p, "YouTube Account")
+
+        self.lbl_yt_account = ttk.Label(
+            acct, text="Checking authorization status…", style="On.TLabel")
+        self.lbl_yt_account.grid(row=0, column=0, columnspan=2, sticky="w", pady=4)
+
+        self.btn_yt_authorize = ttk.Button(
+            acct, text="(Re) Authorize YouTube", style="Ghost.TButton",
+            command=self.on_authorize_youtube)
+        self.btn_yt_authorize.grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        acct.columnconfigure(1, weight=1)
+
+        self.refresh_yt_account_status()
+
         o = self._card(p, "Scheduling")
 
         self.schedule_enabled_check = ttk.Checkbutton(
@@ -1113,6 +1128,96 @@ class App:
                 self.update_preview()
         except Exception:
             pass
+
+    def refresh_yt_account_status(self) -> None:
+        from vp.config import Config
+        cfg = Config.load()
+        cid = cfg.env("YT_CLIENT_ID")
+        secret = cfg.env("YT_CLIENT_SECRET")
+        if not (cid and secret):
+            self.lbl_yt_account.configure(
+                text="Not configured — set YT_CLIENT_ID / YT_CLIENT_SECRET in .env, "
+                     "then click Authorize.")
+            return
+
+        from vp.pipeline.youtube import TOKEN_FILE
+        if TOKEN_FILE.exists():
+            self.lbl_yt_account.configure(
+                text="Authorized (token cached). Click Re-Authorize to switch channel.")
+        else:
+            self.lbl_yt_account.configure(
+                text="Credentials set but not yet authorized. Click Authorize to continue.")
+
+    def on_authorize_youtube(self) -> None:
+        from vp.config import Config
+        cfg = Config.load()
+        cid = cfg.env("YT_CLIENT_ID")
+        secret = cfg.env("YT_CLIENT_SECRET")
+        if not (cid and secret):
+            messagebox.showerror(
+                "YouTube API not configured",
+                "YT_CLIENT_ID and/or YT_CLIENT_SECRET are not set.\n\n"
+                "Add them to your .env file (see .env.example), then click "
+                "\"(Re) Authorize YouTube\" again.")
+            return
+
+        self.btn_yt_authorize.configure(state="disabled")
+        self.lbl_yt_account.configure(
+            text="Opening browser for Google sign-in… approve the consent screen "
+                 "for the channel to use for auto-publish.")
+
+        threading.Thread(
+            target=self._authorize_youtube_worker, args=(cid, secret), daemon=True
+        ).start()
+
+    def _authorize_youtube_worker(self, cid: str, secret: str) -> None:
+        try:
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            from googleapiclient.discovery import build
+            from vp.pipeline.youtube import SCOPES, _save_token, _update_env_refresh_token
+
+            flow = InstalledAppFlow.from_client_config(
+                {"installed": {
+                    "client_id":     cid,
+                    "client_secret": secret,
+                    "auth_uri":      "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri":     "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["http://localhost"],
+                }},
+                scopes=SCOPES,
+            )
+            creds = flow.run_local_server(port=0)
+            _save_token(creds)
+            if creds.refresh_token:
+                _update_env_refresh_token(creds.refresh_token)
+
+            channel_name = "Unknown channel"
+            try:
+                yt = build("youtube", "v3", credentials=creds)
+                ch_resp = yt.channels().list(mine=True, part="snippet").execute()
+                items = ch_resp.get("items", [])
+                if items:
+                    channel_name = items[0]["snippet"]["title"]
+            except Exception:
+                pass
+
+            def on_success():
+                self.btn_yt_authorize.configure(state="normal")
+                self.lbl_yt_account.configure(text=f"Authorized as: {channel_name}")
+                messagebox.showinfo(
+                    "YouTube authorized",
+                    f"Authorized channel: {channel_name}\n\n"
+                    "This channel will be used for auto-publish uploads.")
+            self.master.after(0, on_success)
+
+        except Exception as e:
+            err = str(e)
+
+            def on_error():
+                self.btn_yt_authorize.configure(state="normal")
+                self.lbl_yt_account.configure(text="Authorization failed. Click to retry.")
+                messagebox.showerror("Authorization failed", err[:500])
+            self.master.after(0, on_error)
 
     def refresh_slots_ui(self) -> None:
         for child in self.slots_frame.winfo_children():
