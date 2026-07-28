@@ -27,26 +27,49 @@ EXPIRE_TIME_READABLE = "Unknown"
 USAGE_TRACKING_FILE = ROOT / ".usage_quota"
 FREE_QUOTA_LIMIT = 10
 
-def get_machine_id() -> str:
-    """Generates a persistent hardware identifier for Windows and macOS."""
+MACHINE_ID_CACHE_FILE = ROOT / ".machine_id"
+
+
+def _detect_machine_id() -> str | None:
+    """Best-effort lookup of a stable hardware identifier for Windows and macOS."""
     os_name = platform.system().lower()
-    
+
     if "windows" in os_name:
         try:
             import winreg
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography")
             guid, _ = winreg.QueryValueEx(key, "MachineGuid")
-            return guid.strip()
+            if guid and guid.strip():
+                return guid.strip()
         except Exception:
-            try:
-                output = subprocess.check_output("wmic csproduct get uuid", shell=True, text=True)
-                return output.split("\n")[1].strip()
-            except Exception:
-                pass
-                
+            pass
+        try:
+            output = subprocess.check_output(
+                ["wmic", "csproduct", "get", "uuid"], text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            if len(lines) > 1 and lines[1].upper() != "UUID":
+                return lines[1]
+        except Exception:
+            pass
+        try:
+            output = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_ComputerSystemProduct).UUID"],
+                text=True, stderr=subprocess.DEVNULL,
+            )
+            uuid_str = output.strip()
+            if uuid_str:
+                return uuid_str
+        except Exception:
+            pass
+
     elif "darwin" in os_name:  # macOS
         try:
-            output = subprocess.check_output("ioreg -rd1 -c IOPlatformExpertDevice", shell=True, text=True)
+            output = subprocess.check_output(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], text=True,
+            )
             for line in output.splitlines():
                 if "IOPlatformUUID" in line:
                     parts = line.split("=")
@@ -54,9 +77,37 @@ def get_machine_id() -> str:
                         return parts[1].strip().strip('"')
         except Exception:
             pass
-            
-    import uuid
-    return f"fallback-{uuid.getnode()}"
+
+    return None
+
+
+def get_machine_id() -> str:
+    """Returns a persistent hardware identifier for this machine.
+
+    Hardware lookups above can fail or return non-deterministic values
+    (e.g. uuid.getnode() falls back to a random ID that changes per
+    process). To guarantee the SAME id is sent on every run, whatever
+    id is resolved on first use is cached to disk and reused thereafter.
+    """
+    if MACHINE_ID_CACHE_FILE.exists():
+        try:
+            cached = MACHINE_ID_CACHE_FILE.read_text(encoding="utf-8").strip()
+            if cached:
+                return cached
+        except Exception:
+            pass
+
+    machine_id = _detect_machine_id()
+    if not machine_id:
+        import uuid
+        machine_id = f"fallback-{uuid.uuid4()}"
+
+    try:
+        MACHINE_ID_CACHE_FILE.write_text(machine_id, encoding="utf-8")
+    except Exception:
+        pass
+
+    return machine_id
 
 
 def decrypt_urls() -> dict:

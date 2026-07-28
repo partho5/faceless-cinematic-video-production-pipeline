@@ -44,6 +44,8 @@ assets/SFX-Sound-Effects/
 
 # user-specific data
 .usage_quota
+.lic_key
+.machine_id
 
 # moviepy render temp artifacts
 *TEMP_MPY_*.mp4
