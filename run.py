@@ -883,7 +883,8 @@ class App:
 
         ttk.Label(v, text="Voice", style="On.TLabel").grid(
             row=0, column=0, sticky="w", padx=(0, 14), pady=4)
-        self.voice_var = tk.StringVar(value="Leda")
+        self.voice_var = tk.StringVar(
+            value=_load_render_profile().get("voice", "Leda"))
         voice_cb = ttk.Combobox(v, textvariable=self.voice_var,
                                 values=_GEMINI_VOICES, state="readonly", width=24)
         voice_cb.grid(row=0, column=1, sticky="w", pady=4)
@@ -1721,6 +1722,7 @@ class App:
         _save_render_profile({
             "add_music": self.add_music.get(),
             "highly_emotional": self.highly_emotional.get(),
+            "voice": self.voice_var.get(),
             "output_dir": self.output_dir_var.get().strip(),
             "shape": self.shape.get(),
             "duration_min": self.duration_min.get(),
