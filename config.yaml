@@ -66,8 +66,11 @@ models:
     voice_name: Leda                    # locked: approved voice
     # AI-Studio-style framing prepended to every chapter (the prompt the
     # user validated). Override per-video via video_meta.tts_scene/tts_context.
-    tts_scene: " psychological youtube video narration. The voice speaks like an investigator exposing a system that has been quietly manipulating people in plain sight, revealing what they never noticed was happening to them."
-    tts_context: "This is for a consumer psychology channel that uncovers the hidden mechanics behind buying behavior. Default delivery is fast, confident, and authoritative, like someone who already knows the twist before the audience does. When a hidden manipulation is revealed, the voice sharpens and rises in volume and intensity, landing the reveal like a punch. Tone shifts naturally with the content: anger tightens and hardens the voice, humor loosens it with a wry, knowing edge, excitement speeds it up and lifts the pitch. Pacing is dynamic throughout, never flat or monotone, always moving with the emotional beat of the script."
+    # NOTE: gemini-3.1-flash-tts-preview defaults to a dramatic, spacious
+    # cadence (see model comment above) — tts_context leans hard on "fast",
+    # "clipped", "no dead air" to fight that built-in slowness.
+    tts_scene: "body signal decoder youtube video narration. The voice speaks like a sharp health investigator translating the warning signs your body is quietly sending, catching each signal the moment it appears before it turns into something serious."
+    tts_context: "This is for a body-signals and health-awareness channel that decodes what fatigue, pain, cravings, sleep, and internal physical symptoms are really telling you about your health and body. Default delivery is fast and clipped, short punchy phrases with almost no dead air between them, like someone racing to flag a warning sign before it gets missed. A small reveal lands every few seconds — a symptom decoded, a hidden cause named — and the voice snaps sharp on it, then pushes straight into the next signal without settling. Every line opens a question the next line hasn't answered yet, so curiosity never closes and attention never gets a chance to drift. Tone shifts fast with the content: concern tightens and lowers the voice on a warning sign, urgency sharpens it on symptoms that shouldn't be ignored, relief briefly softens it on the fix or explanation, then it snaps back to alert for the next cue. The throughline is urgency and momentum, not calm authority. Pacing stays quick and forward-leaning throughout, favoring short punchy phrasing over long unwinding sentences, built to keep pulling the viewer to the next second instead of letting them settle."
     params: { temperature: 1.0 }
 
   # Word-level timing — local, no API. See planning/06.
@@ -96,7 +99,7 @@ channel:
   # interrogation, nostalgia). Per-segment color_grade_override still
   # wins. Pick a grade that matches your channel's tone; "clinical" is
   # the most niche-neutral.
-  base_color_grade: cold_isolation
+  base_color_grade: clinical
 
 # Brand voice for thumbnail prompts (metadata.json -> thumbnail_prompt).
 # Thumbnails are now produced manually: paste `thumbnail_prompt` from
@@ -108,17 +111,17 @@ branding:
     # Two hex colors. First = primary accent (highlights, rim light, single
     # focal pop). Second = dominant background tone. Keep the rest of the
     # frame muted so the accent reads instantly at thumbnail size.
-    accent_colors: ["#E84545", "#0F0F1A"]
+    accent_colors: ["#FF3B30", "#0B1620"]
     # Short style descriptor — one phrase. Sets the visual genre.
-    theme: "cinematic dark psychology"
+    theme: "clinical body-signal anatomy"
     # Emotional register the image should convey.
-    mood: "tense, eerie, intimate, unsettling"
+    mood: "urgent, alert, visceral, clean"
     # Lighting recipe. Specific beats lighting; vague reads as default-AI.
-    lighting: "low-key chiaroscuro, single hard rim light, deep blacks"
+    lighting: "cool clinical light with one warm red highlight glowing on the affected area, deep shadow elsewhere"
     # Rendering / lens / medium.
-    style: "photoreal, 35mm, shallow depth of field, cinematic film grain"
+    style: "photoreal, macro anatomical detail, shallow depth of field, subtle film grain"
     # Hard exclusions the model must obey.
-    negative: "no text, no logos, no neon glow, no floating objects, no unmotivated lighting, no clutter, no extra limbs, no oversaturated colors"
+    negative: "no text, no logos, no gore, no graphic wounds, no neon glow, no floating objects, no unmotivated lighting, no clutter, no extra limbs, no oversaturated colors"
 
 # Gemini rate limiting — applies to TTS + LLM fallback calls combined.
 # tier: free  → proactive per-key sliding-window cap at `rpm` req/min.
