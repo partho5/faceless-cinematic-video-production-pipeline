@@ -255,7 +255,7 @@ def run(topic: str, *, preset: str = "preview", approve: bool = False,
     align_offline = cfg.model("forced_alignment").offline or vr.offline
     for s in doc.segments:
         aligns[s.id] = align_segment(
-            s.id, s.text_overlay, Path(s.audio_path),
+            s.id, s.spoken_text, Path(s.audio_path),
             pre_ms=s.pre_silence_ms, post_ms=s.post_silence_ms,
             offline=align_offline,
         )

@@ -343,11 +343,11 @@ class VoiceStage:
         cached = synthesized = 0
         for ch in order:
             segs = groups[ch]
-            text = " ".join(s.text_overlay.strip()
-                            for s in segs if s.text_overlay).strip()
+            text = " ".join(s.spoken_text.strip()
+                            for s in segs if s.spoken_text).strip()
             if not text:
                 # Defense-in-depth: validator-repair normally guarantees a
-                # non-empty text_overlay per segment, but if a chapter still
+                # non-empty spoken_text per segment, but if a chapter still
                 # arrives with nothing to speak, write a brief silent stub
                 # per segment so downstream reflow() (which requires every
                 # segment to have an audio_path) never crashes the run.
@@ -403,7 +403,7 @@ class VoiceStage:
         flat, owner, first_flat = [], [], [None] * len(segs)
         for si, s in enumerate(segs):
             toks = [t for t in (normalize_token(x)
-                                for x in (s.text_overlay or "").split()) if t]
+                                for x in (s.spoken_text or "").split()) if t]
             if toks and first_flat[si] is None:
                 first_flat[si] = len(flat)
             for t in toks:

@@ -207,7 +207,7 @@ answer. Never invent cues to look thorough."""
 def _user_prompt(doc: ControlDocument) -> str:
     title = str(doc.video_meta.get("title", "") or "")
     full = " ".join(
-        s.text_overlay.strip() for s in doc.segments if s.text_overlay
+        s.spoken_text.strip() for s in doc.segments if s.spoken_text
     ).strip()
     segs = [
         {
@@ -216,7 +216,7 @@ def _user_prompt(doc: ControlDocument) -> str:
             "cut_in": s.cut_in_type,
             "cut_out": s.cut_out_type,
             "dur_s": round(s.duration, 1),
-            "text": (s.text_overlay or "").strip(),
+            "text": (s.spoken_text or "").strip(),
         }
         for s in doc.segments
     ]

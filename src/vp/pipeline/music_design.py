@@ -111,7 +111,7 @@ def _user_prompt(doc: ControlDocument) -> str:
     # first ~150 words of narration — enough for tone/niche, cheap on tokens
     words: list[str] = []
     for s in doc.segments:
-        words.extend((s.text_overlay or "").split())
+        words.extend((s.spoken_text or "").split())
         if len(words) >= 150:
             break
     opening = " ".join(words[:150])

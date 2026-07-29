@@ -212,6 +212,59 @@ class ScriptStage:
         return path
 
 
+_SENT_END_RE = re.compile(r"[.!?][\"'’”)]*$")
+_CLAUSE_END_RE = re.compile(r"[,;:—–][\"'’”)]*$")
+
+
+def split_spoken_chunks(text: str, *, target_min: int = 6,
+                        target_max: int = 12) -> list[str]:
+    """Deterministically slice approved narration into speakable beats.
+
+    Lossless by construction: every whitespace-delimited token of `text`
+    lands in exactly one output chunk, in the original order, so joining the
+    chunks with spaces reproduces the source word-for-word. This replaces an
+    earlier design where an LLM rewrote each chapter into beats directly —
+    that free-form rewrite routinely paraphrased away entire clauses (e.g.
+    subordinate "because..." clauses) that didn't fit its target beat length,
+    and those words were never sent to TTS at all. Cutting mechanically means
+    the LLM downstream only ever attaches direction metadata to a beat; it
+    can no longer make content vanish.
+
+    Prefers to cut at sentence ends once a chunk has >= target_min words,
+    else at a clause boundary (comma/semicolon/dash) once it has >=
+    target_max words, else forces a cut past 2x target_max so a clause-free
+    run-on can't balloon into one unspeakable beat.
+    """
+    tokens = text.split()
+    if not tokens:
+        return []
+    chunks: list[list[str]] = []
+    cur: list[str] = []
+    last = len(tokens) - 1
+    for i, tok in enumerate(tokens):
+        cur.append(tok)
+        if i == last:
+            break
+        n = len(cur)
+        if n >= target_min and _SENT_END_RE.search(tok):
+            chunks.append(cur)
+            cur = []
+        elif n >= target_max and _CLAUSE_END_RE.search(tok):
+            chunks.append(cur)
+            cur = []
+        elif n >= target_max * 2:
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    # fold a too-short trailing fragment into its predecessor (cosmetic
+    # beat-length cleanup only — still lossless, order preserved)
+    if len(chunks) >= 2 and len(chunks[-1]) < max(1, target_min // 2):
+        chunks[-2].extend(chunks[-1])
+        chunks.pop()
+    return [" ".join(c) for c in chunks]
+
+
 def split_chapters(script_md: str) -> list[tuple[str, str]]:
     """-> [(chapter_label, chapter_text)] from the **[...]** markers."""
     parts = re.split(r"\*\*\[([^\]]+)\][^\n*]*\*\*", script_md)
@@ -300,8 +353,11 @@ def _parse_chapter_specs(chapters_parsed: list[tuple[str, str]]) -> list[dict]:
 
 # ----------------------------------------------------------------- Stage 2 --
 _SEG_SYS = (
-    "You are a video director. Split the chapter into 2-4s beats at clause "
-    "boundaries (~6-10 words each). For EACH segment emit a JSON object with: "
+    "You are a video director. The chapter's narration has already been "
+    "split for you into a NUMBERED list of FIXED spoken beats — this split "
+    "is final. Do not reword, merge, split, reorder, add, or drop any beat; "
+    "your job is only to attach direction metadata to each one, in the same "
+    "order, one JSON object per beat. For EACH beat emit a JSON object with: "
     "id, beat_type, start, end, text_overlay, tts_scene, tts_delivery, "
     "text_personality (aggressive|clinical|whisper|reveal|handwritten), "
     "pre_silence_ms, post_silence_ms (engineered dramatic pauses, ms, "
@@ -315,16 +371,17 @@ _SEG_SYS = (
     "editorial pass; inventing them here is ignored. "
     "Rapid enumerations -> camera_motion 'rapid_clip_montage' with "
     "montage_clips [{query,duration}]. "
-    "REQUIRED non-empty strings on EVERY segment: text_overlay (the on-screen "
-    "caption, never blank), tts_scene (one short sentence of spoken narration "
-    "— may equal text_overlay verbatim if the caption is the narration), "
-    "tts_delivery (one short delivery direction, e.g. 'calm, measured'). "
-    "If a beat is overlay-only with no spoken line, still copy text_overlay "
-    "into tts_scene so the TTS has something to read. "
+    "REQUIRED non-empty strings on EVERY beat: text_overlay (a short "
+    "on-screen CAPTION for the beat — you MAY condense/shorten the beat's "
+    "wording here for readability, never blank), tts_scene (a short "
+    "scene-setting note for the voice director, e.g. 'a calm establishing "
+    "moment' — NOT the spoken words, just the mood/setting), tts_delivery "
+    "(one short delivery direction, e.g. 'calm, measured'). "
     "start/end are ordering hints only; use ABSOLUTE timestamps (m:ss from "
     "video start) matching the chapter's time window — do NOT restart at 0:00 "
     "per chapter. "
-    "Return ONLY a JSON array of segments, no prose, no trailing commas."
+    "Return ONLY a JSON array of EXACTLY as many objects as there are "
+    "numbered beats, in the same order, no prose, no trailing commas."
 )
 
 
@@ -493,11 +550,16 @@ class SegmentStage:
         self.cfg = cfg
         self.spec = cfg.model("segmentation_direction")
 
-    def _anthropic_chapter(self, label: str, text: str, prior_repair: str | None):
+    def _anthropic_chapter(self, label: str, chunks: list[str],
+                           prior_repair: str | None):
         from ..llm import anthropic_message  # lazy
         from ..schema.model import _num
 
-        user = f"Chapter [{label}]:\n{text}"
+        numbered = "\n".join(f"{i}. {c}" for i, c in enumerate(chunks, 1))
+        user = (
+            f"Chapter [{label}] — {len(chunks)} FIXED spoken beats "
+            f"(do not reword/merge/split/reorder/skip any):\n{numbered}"
+        )
         if prior_repair:
             user += f"\n\nThe previous output FAILED validation: {prior_repair}\nFix and resend."
         raw = anthropic_message(self.spec, system=_SEG_SYS, user=user)
@@ -539,26 +601,45 @@ class SegmentStage:
         ch_cache.mkdir(parents=True, exist_ok=True)
         all_segs: list[dict] = []
         for ci, (label, text) in enumerate(chapters_parsed, 1):
+            chunks = split_spoken_chunks(text)
             cache_file = ch_cache / f"{ci}.json"
             if cache_file.exists():
                 try:
                     segs = json.loads(cache_file.read_text(encoding="utf-8"))
-                    _log(f"stage2: chapter {ci}/{n} [{label}] (cached, skipping API call)")
-                    all_segs.extend(segs)
-                    continue
+                    # stale cache from before spoken_text existed (or from a
+                    # different chunking) -> fall through and regenerate,
+                    # never trust it silently.
+                    if (len(segs) == len(chunks)
+                            and all(s.get("spoken_text") for s in segs)):
+                        _log(f"stage2: chapter {ci}/{n} [{label}] "
+                             f"(cached, skipping API call)")
+                        all_segs.extend(segs)
+                        continue
+                    _log(f"stage2: chapter {ci}/{n} [{label}] cache stale "
+                         f"(pre-fix format) — regenerating")
                 except Exception:
                     pass
             repair_note = None
             for attempt in range(3):  # G3 per-chapter retry
                 try:
-                    segs = self._anthropic_chapter(label, text, repair_note)
+                    segs = self._anthropic_chapter(label, chunks, repair_note)
                 except Exception as e:
                     repair_note = str(e)[:300]
                     _log(f"stage2: chapter {ci}/{n} [{label}] "
                          f"attempt {attempt + 1}/3 failed: {str(e)[:120]}")
                     continue
-                for si, s in enumerate(segs, 1):
+                if len(segs) != len(chunks):
+                    repair_note = (
+                        f"you returned {len(segs)} objects but there are "
+                        f"{len(chunks)} fixed spoken beats — return exactly "
+                        f"{len(chunks)} objects, one per beat, same order."
+                    )
+                    _log(f"stage2: chapter {ci}/{n} [{label}] "
+                         f"attempt {attempt + 1}/3: {repair_note}")
+                    continue
+                for si, (s, chunk) in enumerate(zip(segs, chunks), 1):
                     s["id"] = f"c{ci}_seg{si}"
+                    s["spoken_text"] = chunk  # authoritative; never LLM-authored
                 cache_file.write_text(json.dumps(segs), encoding="utf-8")
                 all_segs.extend(segs)
                 _log(f"stage2: chapter {ci}/{n} [{label}] -> "

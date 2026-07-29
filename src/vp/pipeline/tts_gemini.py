@@ -49,7 +49,7 @@ def build_prompt(seg: Segment, persona_prefix: str, prev_line: str | None) -> st
         parts.append(f"Previously said (do not speak): \"{prev_line}\".")
     parts.append(f"Scene: {seg.tts_scene}.")
     parts.append(f"Delivery: {seg.tts_delivery}.")
-    parts.append(f"Say: {seg.text_overlay}")
+    parts.append(f"Say: {seg.spoken_text}")
     return " ".join(parts)
 
 
@@ -130,11 +130,11 @@ class TTSEngine:
     ) -> TTSResult:
         takes = self.default_takes if takes is None else takes
         prompt = build_prompt(seg, self.persona, prev_line)
-        target = max(0.6, len(seg.text_overlay.split()) / 2.6)
+        target = max(0.6, len(seg.spoken_text.split()) / 2.6)
         offline = self.spec.offline
 
         if offline:
-            best = _offline_voice(seg.text_overlay)
+            best = _offline_voice(seg.spoken_text)
             n_takes = 1
         else:
             candidates = []
@@ -144,7 +144,7 @@ class TTSEngine:
                 except Exception:  # G12: retry/fallback handled by multi-take
                     continue
             if not candidates:  # total provider failure -> safe stub
-                best = _offline_voice(seg.text_overlay)
+                best = _offline_voice(seg.spoken_text)
                 offline, n_takes = True, 1
             else:
                 best = min(candidates, key=lambda s: _score_take(s, target))
@@ -177,5 +177,5 @@ def synthesize_all(cfg: Config, segments: list[Segment], audio_dir: Path) -> lis
         res = eng.synthesize(seg, audio_dir, prev_line=prev)
         seg.audio_path = str(res.audio_path)
         results.append(res)
-        prev = seg.text_overlay
+        prev = seg.spoken_text
     return results

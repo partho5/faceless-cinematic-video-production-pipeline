@@ -13,7 +13,7 @@ from vp.pipeline import voice as V
 @dataclass
 class FakeSeg:
     id: str
-    text_overlay: str
+    spoken_text: str
     audio_path: str = ""
     tts_scene: str | None = None
     tts_context: str | None = None

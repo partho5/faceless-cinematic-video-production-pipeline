@@ -51,7 +51,12 @@ class Segment:
     beat_type: str
     start: float
     end: float
+    # text_overlay: on-screen CAPTION only (may be condensed for readability).
+    # spoken_text: the ACTUAL words sent to TTS — mechanically sliced from the
+    # approved script (never LLM-paraphrased), so narration content can never
+    # be silently dropped the way a free-form caption rewrite could.
     text_overlay: str = ""
+    spoken_text: str = ""
     tts_scene: str = ""
     tts_delivery: str = ""
     audio_path: str | None = None

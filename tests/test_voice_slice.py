@@ -13,7 +13,7 @@ from vp.pipeline.voice import VoiceStage
 @dataclass
 class FakeSeg:
     id: str
-    text_overlay: str
+    spoken_text: str
     audio_path: str = ""
 
 

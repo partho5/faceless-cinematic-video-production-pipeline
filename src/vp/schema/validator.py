@@ -105,11 +105,11 @@ def validate(
             )
             s.end = s.start + 2.0
 
-        # TTS/caption fields: the main VoiceStage path uses text_overlay
-        # only; tts_scene/tts_delivery feed the per-segment fallback
-        # (tts_gemini.py). All three are auto-repaired with mutual fallback
-        # rather than rejected — an LLM that drops one field on a
-        # caption-only beat must not block the entire render.
+        # Caption/scene fields: text_overlay is the on-screen caption,
+        # tts_scene is a scene-setting note (neither drives spoken audio —
+        # see spoken_text below). Auto-repaired with mutual fallback rather
+        # than rejected — an LLM that drops one field on a caption-only beat
+        # must not block the entire render.
         ts = (s.tts_scene or "").strip()
         to = (s.text_overlay or "").strip()
         if not ts and to:
@@ -134,6 +134,17 @@ def validate(
             r.warnings.append(
                 f"{s.id}: text_overlay AND tts_scene empty "
                 f"-> placeholder '...' (segment will read as a brief pause)"
+            )
+
+        # spoken_text is the mechanically-sliced source of truth for TTS
+        # (script_gen's splitter always sets it). Legacy/sample documents
+        # that predate the field won't have it — fall back to text_overlay
+        # rather than reject, but only here, never the other direction: we
+        # never want text_overlay silently overwritten by a shorter caption.
+        if not (s.spoken_text and s.spoken_text.strip()):
+            s.spoken_text = s.text_overlay
+            r.warnings.append(
+                f"{s.id}: spoken_text empty -> repaired from text_overlay"
             )
         if not (s.tts_delivery and s.tts_delivery.strip()):
             s.tts_delivery = "natural narration"

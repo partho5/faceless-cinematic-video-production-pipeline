@@ -185,3 +185,74 @@ def test_repair_chapter_timestamps_per_chapter_relative():
     assert segs[0]["start"] == 70.0
     assert segs[1]["start"] == 73.0
     assert segs[2]["start"] == 76.0
+
+
+# ---- mechanical spoken-beat splitter (regression lock) ----------------------
+# Root cause of "partial script lines missed in output video": Stage-2 used to
+# have an LLM *rewrite* each chapter into short beats, and it routinely
+# paraphrased away entire clauses that didn't fit the target beat length —
+# those words were never sent to TTS. split_spoken_chunks replaces that
+# free-form rewrite with a deterministic slice: the LLM only attaches
+# direction metadata afterward, so it can no longer make content vanish.
+
+def test_split_spoken_chunks_is_lossless():
+    from vp.pipeline.script_gen import split_spoken_chunks
+
+    text = (
+        "Researchers call prolonged sitting \"sitting disease\" — a term "
+        "that didn't exist twenty years ago because desk jobs never used to "
+        "demand eight straight hours in one position. Your spine evolved "
+        "for constant micro-movement, not stillness. The damage from "
+        "ignoring that isn't sudden; it stacks quietly, hour by hour, "
+        "until a normal Tuesday turns into a day you can't stand up "
+        "straight. And here's the part most people miss — by the time you "
+        "feel the pain, the underlying damage has usually been building "
+        "for months."
+    )
+    chunks = split_spoken_chunks(text)
+    # every source word survives, in order, in exactly one chunk
+    assert " ".join(chunks).split() == text.split()
+    # and it actually produced more than one beat (the point of splitting)
+    assert len(chunks) > 1
+
+
+def test_split_spoken_chunks_handles_empty_and_short_text():
+    from vp.pipeline.script_gen import split_spoken_chunks
+
+    assert split_spoken_chunks("") == []
+    assert split_spoken_chunks("Take care.") == ["Take care."]
+
+
+def test_split_spoken_chunks_forces_cut_on_long_run_without_punctuation():
+    from vp.pipeline.script_gen import split_spoken_chunks
+
+    text = " ".join(f"word{i}" for i in range(40))  # no punctuation at all
+    chunks = split_spoken_chunks(text)
+    assert " ".join(chunks).split() == text.split()
+    assert len(chunks) > 1  # must not collapse into one unspeakable beat
+
+
+# ---- spoken_text is the TTS source of truth (regression lock) --------------
+
+def test_spoken_text_empty_repaired_from_text_overlay():
+    """Legacy/sample documents predate spoken_text; validator must backfill
+    it from text_overlay rather than reject, so old fixtures keep working."""
+    doc = load_sample_document()
+    s = doc.segments[0]
+    assert s.spoken_text == ""
+    r = validate(doc)
+    assert r.ok, str(r)
+    assert s.spoken_text == s.text_overlay
+    assert any("spoken_text empty" in w for w in r.warnings)
+
+
+def test_spoken_text_untouched_when_already_set():
+    """Once the mechanical splitter has populated spoken_text, validation
+    must never overwrite it with a (possibly shortened) caption."""
+    doc = load_sample_document()
+    s = doc.segments[0]
+    s.spoken_text = "the real, complete, mechanically-sliced narration"
+    s.text_overlay = "a short caption"
+    r = validate(doc)
+    assert r.ok, str(r)
+    assert s.spoken_text == "the real, complete, mechanically-sliced narration"
