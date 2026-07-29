@@ -508,6 +508,24 @@ def audit(args) -> Report:
 
 
 # ───────────────────────────── PHASE C helpers ──────────────────────────
+_FONT_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true", b"typ1", b"ttcf",
+               b"wOFF", b"wOF2")
+
+
+def _looks_like_font(path: Path) -> bool:
+    """Reject HTML/error-page bodies saved with a .ttf name (e.g. a
+    github.com/raw 404 or rate-limit page written to disk by a naive
+    download). Checked by magic bytes, not extension, so a corrupted
+    file already on disk is caught and re-downloaded on the next
+    install run instead of silently staying broken forever."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(8)
+    except OSError:
+        return False
+    return head.startswith(_FONT_MAGIC)
+
+
 def download(url: str, dest: Path, prog: Progress | None = None,
               sha256: str | None = None, retries: int = 3) -> bool:
     """Verified download with byte-% progress + retry/backoff."""
@@ -784,8 +802,12 @@ def execute(r: Report, args) -> int:
                 "NotoSansJP[wght].ttf":              "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
                 "NotoSansDevanagari[wdth,wght].ttf": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
                 "NotoSansBengali[wdth,wght].ttf":    "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansbengali/NotoSansBengali%5Bwdth,wght%5D.ttf",
-                # DejaVu — bundled Latin fallback, guaranteed on all platforms
-                "DejaVuSans-Bold.ttf":      "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
+                # DejaVu — bundled Latin fallback, guaranteed on all platforms.
+                # NB: the upstream dejavu-fonts/dejavu-fonts repo only ships
+                # .sfd sources, not built .ttf — that path 404s. This mirror
+                # (used by conda-forge/solus/etc. as their ttf source) has
+                # the actual built binaries.
+                "DejaVuSans-Bold.ttf":      "https://raw.githubusercontent.com/senotrusov/dejavu-fonts-ttf/master/ttf/DejaVuSans-Bold.ttf",
                 # Aesthetic subtitle fonts — WARN on failure (non-fatal)
                 "Anton-Regular.ttf":        "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
                 "Inter-Bold.ttf":           "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
@@ -801,9 +823,17 @@ def execute(r: Report, args) -> int:
             for fname, url in FONT_URLS.items():
                 dest = ROOT / "assets" / "fonts" / fname
                 if dest.exists():
-                    continue
+                    if _looks_like_font(dest):
+                        continue
+                    log(f"{fname} on disk is not a valid font (likely a "
+                        f"stale error page from a broken download) — "
+                        f"re-downloading", "WARN")
+                    dest.unlink()
                 prog.update(0.1, f"downloading {fname}…")
                 ok_dl = download(url, dest, prog)
+                if ok_dl and not _looks_like_font(dest):
+                    dest.unlink(missing_ok=True)
+                    ok_dl = False
                 if not ok_dl:
                     if fname in NOTO_REQUIRED:
                         fatal_fail = True
