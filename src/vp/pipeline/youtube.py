@@ -268,8 +268,15 @@ def upload(video: Path, metadata: dict, cfg: Config) -> dict:
                             if parsed_times:
                                 ref_time = max(parsed_times)
                     
-                    if not ref_time:
-                        ref_time = datetime.now(timezone.utc)
+                    now_utc = datetime.now(timezone.utc)
+                    if not ref_time or ref_time < now_utc:
+                        # ref_time is the last video already on the channel,
+                        # which can be arbitrarily old (no uploads for a
+                        # week+). Never compute a slot from a reference
+                        # earlier than "now" — a past publishAt makes
+                        # YouTube publish the video immediately instead of
+                        # scheduling it.
+                        ref_time = now_utc
 
                     from vp.schedule import calculate_next_slot
                     next_slot = calculate_next_slot(ref_time, schedule_slots)

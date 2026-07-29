@@ -779,8 +779,26 @@ class App:
         self.upload = tk.BooleanVar(value=False)
         self.review = tk.BooleanVar(value=False)
         self.sample = tk.BooleanVar(value=False)
+
+        # Label reflects the real outcome: the Publish tab's schedule
+        # (schedule_enabled) takes priority over this checkbox's plain
+        # "stays PRIVATE" behavior — when it's on, the video is scheduled
+        # to go public per those slots, not kept private indefinitely.
+        self.upload_label_var = tk.StringVar()
+
+        def _update_upload_label(*_a) -> None:
+            if self.schedule_enabled.get():
+                self.upload_label_var.set(
+                    "Upload to my YouTube (scheduled per Publish tab — will go PUBLIC at that slot)")
+            else:
+                self.upload_label_var.set("Upload to my YouTube (stays PRIVATE)")
+
+        self._update_upload_label = _update_upload_label
+        self.schedule_enabled.trace_add("write", _update_upload_label)
+        _update_upload_label()
+
         ttk.Checkbutton(o, variable=self.upload, style="Switch.TCheckbutton",
-                        text="Upload to my YouTube (stays PRIVATE)").grid(
+                        textvariable=self.upload_label_var).grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(10, 1))
         ttk.Checkbutton(o, variable=self.review, style="Switch.TCheckbutton",
                         text="Let me read & approve the story before render"
@@ -1377,11 +1395,16 @@ class App:
                 # ref_str was already set from the fetch block above
             else:
                 from vp.schedule import calculate_next_slot_with_tz
-                next_time_utc, slot_tz, slot_tz_str = calculate_next_slot_with_tz(ref_time, self.schedule_slots)
+                # Compute from the true last-upload time, but never let that
+                # feed a slot earlier than "now" (e.g. channel idle for a
+                # week+) — matches the clamp in pipeline/youtube.py so the
+                # preview reflects what an actual upload would schedule.
+                calc_ref_time = max(ref_time, datetime.now(timezone.utc))
+                next_time_utc, slot_tz, slot_tz_str = calculate_next_slot_with_tz(calc_ref_time, self.schedule_slots)
                 # Format next slot in the slot's local timezone
                 next_local = next_time_utc.astimezone(slot_tz)
                 next_str = next_local.strftime("%A, %Y-%m-%d %I:%M %p") + f" ({slot_tz_str})"
-                # Re-format ref_time in the same timezone for consistency
+                # Re-format the true last-upload ref_time in the same timezone
                 ref_local = ref_time.astimezone(slot_tz)
                 ref_str = ref_local.strftime("%Y-%m-%d %I:%M %p") + f" ({slot_tz_str})"
 
