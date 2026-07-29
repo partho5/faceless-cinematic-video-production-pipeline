@@ -357,23 +357,27 @@ _SEG_SYS = (
     "split for you into a NUMBERED list of FIXED spoken beats — this split "
     "is final. Do not reword, merge, split, reorder, add, or drop any beat; "
     "your job is only to attach direction metadata to each one, in the same "
-    "order, one JSON object per beat. For EACH beat emit a JSON object with: "
-    "id, beat_type, start, end, text_overlay, tts_scene, tts_delivery, "
+    "order, one JSON object per beat. The beat's own words ARE the on-screen "
+    "caption verbatim (captions are word-timed against the actual spoken "
+    "audio, so the caption can never paraphrase or shorten the beat — do "
+    "NOT emit text_overlay, it is filled in for you automatically). "
+    "For EACH beat emit a JSON object with: "
+    "id, beat_type, start, end, tts_scene, tts_delivery, "
     "text_personality (aggressive|clinical|whisper|reveal|handwritten), "
     "pre_silence_ms, post_silence_ms (engineered dramatic pauses, ms, "
     "0-2500; bigger after hooks/revelations and sentence ends), "
     "text_color, text_position, text_animation_in, text_animation_emphasis "
-    "[{word,effect,color_shift?}], text_animation_out, camera_motion, "
-    "clip_query_primary, clip_query_backup, color_grade_override, "
-    "cut_in_type, cut_out_type, music_intensity, "
+    "[{word,effect,color_shift?}] (word MUST be copied verbatim from the "
+    "beat's own text — a word you invent or paraphrase will never be found "
+    "and the highlight silently won't fire), text_animation_out, "
+    "camera_motion, clip_query_primary, clip_query_backup, "
+    "color_grade_override, cut_in_type, cut_out_type, music_intensity, "
     "grain_override, vignette_override, chromatic_aberration. "
     "Do NOT emit sound_fx — sound effects are chosen later by a dedicated "
     "editorial pass; inventing them here is ignored. "
     "Rapid enumerations -> camera_motion 'rapid_clip_montage' with "
     "montage_clips [{query,duration}]. "
-    "REQUIRED non-empty strings on EVERY beat: text_overlay (a short "
-    "on-screen CAPTION for the beat — you MAY condense/shorten the beat's "
-    "wording here for readability, never blank), tts_scene (a short "
+    "REQUIRED non-empty strings on EVERY beat: tts_scene (a short "
     "scene-setting note for the voice director, e.g. 'a calm establishing "
     "moment' — NOT the spoken words, just the mood/setting), tts_delivery "
     "(one short delivery direction, e.g. 'calm, measured'). "
@@ -606,11 +610,15 @@ class SegmentStage:
             if cache_file.exists():
                 try:
                     segs = json.loads(cache_file.read_text(encoding="utf-8"))
-                    # stale cache from before spoken_text existed (or from a
-                    # different chunking) -> fall through and regenerate,
-                    # never trust it silently.
+                    # stale cache from before spoken_text existed, from a
+                    # different chunking, or from the brief window where
+                    # text_overlay was a condensed caption instead of
+                    # mirroring spoken_text (broke caption sync/highlight) ->
+                    # fall through and regenerate, never trust it silently.
                     if (len(segs) == len(chunks)
-                            and all(s.get("spoken_text") for s in segs)):
+                            and all(s.get("spoken_text") for s in segs)
+                            and all(s.get("text_overlay") == s.get("spoken_text")
+                                    for s in segs)):
                         _log(f"stage2: chapter {ci}/{n} [{label}] "
                              f"(cached, skipping API call)")
                         all_segs.extend(segs)
@@ -639,7 +647,18 @@ class SegmentStage:
                     continue
                 for si, (s, chunk) in enumerate(zip(segs, chunks), 1):
                     s["id"] = f"c{ci}_seg{si}"
-                    s["spoken_text"] = chunk  # authoritative; never LLM-authored
+                    # authoritative; never LLM-authored. text_overlay MIRRORS
+                    # spoken_text exactly (never condensed) — the caption
+                    # renderer (fx/text.py) word-times captions against the
+                    # forced-alignment of the spoken audio, so caption tokens
+                    # and aligned words must be the same set or sync/emphasis
+                    # silently breaks (a shortened caption alone caused both
+                    # to fail: fewer caption tokens than aligned words falls
+                    # back to proportional spacing, and emphasis words picked
+                    # from the full beat stop matching a caption that no
+                    # longer contains them).
+                    s["spoken_text"] = chunk
+                    s["text_overlay"] = chunk
                 cache_file.write_text(json.dumps(segs), encoding="utf-8")
                 all_segs.extend(segs)
                 _log(f"stage2: chapter {ci}/{n} [{label}] -> "

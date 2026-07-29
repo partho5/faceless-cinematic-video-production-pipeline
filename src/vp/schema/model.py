@@ -51,10 +51,15 @@ class Segment:
     beat_type: str
     start: float
     end: float
-    # text_overlay: on-screen CAPTION only (may be condensed for readability).
     # spoken_text: the ACTUAL words sent to TTS — mechanically sliced from the
     # approved script (never LLM-paraphrased), so narration content can never
     # be silently dropped the way a free-form caption rewrite could.
+    # text_overlay: the on-screen caption. MUST mirror spoken_text exactly
+    # (script_gen.py enforces this) — fx/text.py word-times captions against
+    # the forced alignment of the spoken audio, so a caption with different
+    # or fewer words than what's actually spoken breaks sync and silently
+    # kills word-emphasis highlighting (a real regression this comment is
+    # here to prevent repeating).
     text_overlay: str = ""
     spoken_text: str = ""
     tts_scene: str = ""
