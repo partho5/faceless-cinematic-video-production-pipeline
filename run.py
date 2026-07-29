@@ -780,25 +780,13 @@ class App:
         self.review = tk.BooleanVar(value=False)
         self.sample = tk.BooleanVar(value=False)
 
-        # Label reflects the real outcome: the Publish tab's schedule
-        # (schedule_enabled) takes priority over this checkbox's plain
-        # "stays PRIVATE" behavior — when it's on, the video is scheduled
-        # to go public per those slots, not kept private indefinitely.
-        self.upload_label_var = tk.StringVar()
-
-        def _update_upload_label(*_a) -> None:
-            if self.schedule_enabled.get():
-                self.upload_label_var.set(
-                    "Upload to my YouTube (scheduled per Publish tab — will go PUBLIC at that slot)")
-            else:
-                self.upload_label_var.set("Upload to my YouTube (stays PRIVATE)")
-
-        self._update_upload_label = _update_upload_label
-        self.schedule_enabled.trace_add("write", _update_upload_label)
-        _update_upload_label()
-
+        # This checkbox only controls an *immediate* private upload. A
+        # Publish-tab schedule (enabled + at least one slot) takes priority
+        # over it: if a schedule is active, the video is uploaded and
+        # scheduled regardless of whether this box is ticked. See
+        # _schedule_is_active() / on_run()'s argv construction.
         ttk.Checkbutton(o, variable=self.upload, style="Switch.TCheckbutton",
-                        textvariable=self.upload_label_var).grid(
+                        text="Upload to youtube immediately (as private video)").grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(10, 1))
         ttk.Checkbutton(o, variable=self.review, style="Switch.TCheckbutton",
                         text="Let me read & approve the story before render"
@@ -1057,13 +1045,26 @@ class App:
             style="Switch.TCheckbutton",
             command=self.save_schedule_config
         )
-        self.schedule_enabled_check.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        self.schedule_enabled_check.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+        # Schedule takes priority: if this is enabled AND at least one slot
+        # is configured below, the render is uploaded and scheduled to that
+        # slot automatically — even if "Upload to youtube immediately" on
+        # the Output tab is left unchecked. That Output-tab checkbox only
+        # matters when no schedule slot is active (immediate private upload).
+        ttk.Label(
+            o,
+            text="When enabled with at least one slot below, this takes "
+                 "priority over the Output tab's upload checkbox — the "
+                 "video is uploaded and scheduled automatically either way.",
+            style="MutedOn.TLabel",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
         self.slots_frame = ttk.Frame(o, style="App.TFrame")
-        self.slots_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(5, 15))
+        self.slots_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(5, 15))
 
         add_frame = ttk.LabelFrame(o, text="  Add New Time Slot  ", style="Card.TLabelframe")
-        add_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=5)
+        add_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=5)
         
         add_inner = ttk.Frame(add_frame, style="Panel.TFrame")
         add_inner.pack(fill="x", padx=14, pady=10)
@@ -1805,7 +1806,13 @@ class App:
             argv += ["--hint", hint]
         if not self.review.get():
             argv.append("--approve")
-        if not self.upload.get():
+        # Schedule takes priority over the plain upload checkbox: an active
+        # schedule (enabled + at least one slot) forces the upload to run
+        # even if "Upload to youtube immediately" is unchecked, since
+        # yt_upload() reads schedule_enabled/schedule_slots itself and will
+        # schedule rather than publish immediately in that case.
+        schedule_active = bool(self.schedule_enabled.get() and self.schedule_slots)
+        if not self.upload.get() and not schedule_active:
             argv.append("--no-upload")
         if self.sample.get():
             argv += ["--segments", SAMPLE_SEGMENTS]
